@@ -25,6 +25,6 @@ Application that reads user highlights (tap and hold on words) on Kindle. These 
 
 3.6 `--no-definitions` adds the words without looking them up, for when the dictionary is down and the words are wanted anyway.
 
-3.4 Deduplicate in three layers: within the batch, across inflections (Kindle's `stem`), and against notes already in the collection.
+3.4 Deduplicate in three layers: within the batch, across inflections, and against notes already in the collection. Kindle's `stem` is a stemmer, not a lemmatizer, and hands back inflections such as `spars`, so it is lemmatized before anything is compared. Every form of a word has to reduce to the same string or it becomes a second card.
 
 3.5 `--csv` writes `word;definition` to `words.csv` as a fallback when syncing is not wanted.

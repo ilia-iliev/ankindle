@@ -238,3 +238,77 @@ class TestLanguageFilter:
                 side_effect=lambda w: w,
             ):
                 assert reader.get_random_test_words(10) == ["Schadenfreude"]
+
+
+class TestKindleStemFailures:
+    """Kindle's `stem` is its own guess and it is regularly an inflection.
+
+    Each row is `(word, stem)` as Kindle records it, followed by the base form
+    the card should carry.
+    """
+
+    KINDLE_MISSES = [
+        ("spars", "spars", "spar"),
+        ("purlieus", "purlieus", "purlieu"),
+        ("fusillades", "fusillades", "fusillade"),
+        ("hoarier", "hoarier", "hoary"),
+        ("gainsaid", "gainsaid", "gainsay"),
+        ("strove", "strove", "strive"),
+        ("indices", "indices", "index"),
+        ("phenomena", "phenomena", "phenomenon"),
+    ]
+
+    def _words(self, temp_dir: str, rows: list[tuple]) -> list[str]:
+        reader = TestKindleReader()._make_reader(temp_dir)
+        TestKindleReader()._insert(reader, rows)
+        with patch.object(
+            reader.frequent_words_manager,
+            "filter_frequent_words",
+            side_effect=lambda w: w,
+        ):
+            return reader.get_words_since_last_access()
+
+    @pytest.mark.parametrize("word,stem,base", KINDLE_MISSES)
+    def test_an_inflected_stem_is_reduced_to_its_base(self, word, stem, base):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            rows = [("100", word, stem, "en", 0, 1705323000000, "profile1")]
+            assert base in self._words(temp_dir, rows)
+
+    def test_the_two_forms_of_one_word_become_one_card(self):
+        """The case that started this: 'spars' and 'spar' are one word."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            rows = [
+                ("100", "spars", "spars", "en", 0, 1705323000000, "profile1"),
+                ("101", "spar", "spar", "en", 0, 1705326600000, "profile1"),
+                ("102", "sparring", "spar", "en", 0, 1705330200000, "profile1"),
+            ]
+            words = self._words(temp_dir, rows)
+            assert words.count("spar") == 1
+            assert "spars" not in words
+
+    def test_a_base_form_is_left_alone(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            rows = [
+                ("100", "hoary", "hoary", "en", 0, 1705323000000, "profile1"),
+                ("101", "trove", "trove", "en", 0, 1705326600000, "profile1"),
+                ("102", "species", "species", "en", 0, 1705330200000, "profile1"),
+                ("103", "news", "news", "en", 0, 1705333800000, "profile1"),
+            ]
+            words = self._words(temp_dir, rows)
+            for base in ("hoary", "trove", "species", "news"):
+                assert base in words
+
+    def test_a_language_with_no_lemmatizer_keeps_the_kindle_stem(self):
+        """Nothing is lost when simplemma has no dictionary for the language."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            reader = TestKindleReader()._make_reader(temp_dir, "xh")
+            TestKindleReader()._insert(
+                reader,
+                [("100", "izinja", "inja", "xh", 0, 1705323000000, "profile1")],
+            )
+            with patch.object(
+                reader.frequent_words_manager,
+                "filter_frequent_words",
+                side_effect=lambda w: w,
+            ):
+                assert reader.get_words_since_last_access() == ["inja"]

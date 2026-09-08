@@ -44,8 +44,10 @@ Deck 'Kindle Words': added 12, skipped 3 already present, 1 had no definition
 2. Read the Kindle vocabulary database to extract looked-up words
 3. Keep only lookups in the chosen language (`--lang`, default `en`) — `vocab.db`
    pools every language you have ever looked a word up in
-4. Normalize inflected lookups to their Kindle-provided stem (for example,
-   `prevaricated` → `prevaricate`) and remove duplicates
+4. Normalize inflected lookups to one base form and remove duplicates. Kindle's
+   own `stem` column is only a first pass — it leaves `spars` as `spars` — so it
+   is run through a dictionary lemmatizer as well (`spars` → `spar`, `hoarier` →
+   `hoary`). A language the lemmatizer has no dictionary for keeps Kindle's stem
 5. Filter out common words (like 'the', 'be', 'to', 'of', 'and', etc.)
 6. Fetch a definition for each word from dictionaryapi.dev
 7. Sync down from AnkiWeb, add the new words as Basic notes (word → `Front`,

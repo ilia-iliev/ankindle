@@ -5,6 +5,7 @@ from datetime import datetime
 
 from config import DATA_DIR
 from frequent_words import FrequentWordsManager
+from lemmatizer import Lemmatizer
 
 
 DEFAULT_LAST_ACCESS_FILE = os.path.join(DATA_DIR, "last_access.txt")
@@ -49,6 +50,7 @@ class KindleReader:
             kindle_path, "system", "vocabulary", "vocab.db"
         )
         self.frequent_words_manager = FrequentWordsManager()
+        self.lemmatizer = Lemmatizer(language)
         self._pending_last_access: datetime | None = None
 
     def _read_kindle_database(self) -> list[dict]:
@@ -69,12 +71,22 @@ class KindleReader:
 
         return [
             {
-                "word": stem.strip() if stem and stem.strip() else word,
+                "word": self._base_form(word, stem),
                 "timestamp": datetime.fromtimestamp(timestamp / 1000),
             }
             for word, stem, lang, timestamp in rows
             if word and timestamp and self._is_wanted_language(lang)
         ]
+
+    def _base_form(self, word: str, stem: str | None) -> str:
+        """The form the card is filed under.
+
+        Kindle's stem is only its first guess - it leaves "spars" as "spars" -
+        so it gets a second pass, and every inflection of a word lands on the
+        same string for deduplication to collapse.
+        """
+        kindle_guess = stem.strip() if stem and stem.strip() else word
+        return self.lemmatizer.lemmatize(kindle_guess)
 
     def _is_wanted_language(self, lang: str | None) -> bool:
         """Kindle writes 'en' or a regional tag like 'en-US'; both are English."""

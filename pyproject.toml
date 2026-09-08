@@ -9,6 +9,7 @@ dependencies = [
     "platformdirs>=4.9.6",
     "pytest>=7.0.0",
     "requests>=2.31.0",
+    "simplemma>=2.0.0",
 ]
 
 [project.optional-dependencies]
