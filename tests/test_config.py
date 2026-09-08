@@ -4,7 +4,7 @@ import tempfile
 
 import pytest
 
-from config import AuthStore, Config
+from ankindle.config import AuthStore, Config
 
 
 @pytest.fixture

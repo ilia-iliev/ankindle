@@ -3,7 +3,7 @@ import os
 
 from platformdirs import user_data_dir
 
-DATA_DIR = user_data_dir("kindle-to-anki")
+DATA_DIR = user_data_dir("ankindle")
 DEFAULT_CONFIG_FILE = os.path.join(DATA_DIR, "config.json")
 DEFAULT_AUTH_FILE = os.path.join(DATA_DIR, "ankiweb_auth.json")
 COLLECTION_PATH = os.path.join(DATA_DIR, "collection.anki2")

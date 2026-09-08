@@ -4,7 +4,12 @@ import os
 import sqlite3
 from datetime import datetime
 from unittest.mock import patch
-from kindle.reader import KindleReader, LastAccessManager
+from ankindle.definition_curator import Lookup
+from ankindle.kindle.reader import KindleReader, LastAccessManager
+
+
+def words_of(lookups: list[Lookup]) -> list[str]:
+    return [lookup.word for lookup in lookups]
 
 
 class TestLastAccessManager:
@@ -59,6 +64,19 @@ class TestKindleReader:
                 )
                 """
             )
+            conn.execute(
+                """
+                CREATE TABLE LOOKUPS (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    word_key TEXT,
+                    book_key TEXT,
+                    dict_key TEXT,
+                    pos TEXT,
+                    usage TEXT,
+                    timestamp INTEGER DEFAULT 0
+                )
+                """
+            )
             conn.executemany(
                 "INSERT INTO WORDS (id, word, stem, lang, category, timestamp, profileid) VALUES (?, ?, ?, ?, ?, ?, ?)",
                 [
@@ -66,6 +84,11 @@ class TestKindleReader:
                     ("2", "banana", "banana", "en", 0, 1705315800000, "profile1"),
                     ("3", "cherry", "cherry", "en", 0, 1705319400000, "profile1"),
                 ],
+            )
+            conn.executemany(
+                "INSERT INTO LOOKUPS (id, word_key, usage) VALUES (?, ?, ?)",
+                [(f"l{i}", str(i), f"A sentence about {w}.")
+                 for i, w in enumerate(["apple", "banana", "cherry"], 1)],
             )
         return db_path
 
@@ -83,6 +106,10 @@ class TestKindleReader:
                 " VALUES (?, ?, ?, ?, ?, ?, ?)",
                 rows,
             )
+            conn.executemany(
+                "INSERT INTO LOOKUPS (id, word_key, usage) VALUES (?, ?, ?)",
+                [(f"l{row[0]}", row[0], f"A sentence about {row[1]}.") for row in rows],
+            )
 
     def test_get_words_since_last_access(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -92,7 +119,7 @@ class TestKindleReader:
                 "filter_frequent_words",
                 side_effect=lambda w: w,
             ):
-                words = reader.get_words_since_last_access()
+                words = words_of(reader.get_words_since_last_access())
                 assert set(words) == {"apple", "banana", "cherry"}
 
     def test_normalizes_stems_and_removes_inflection_duplicates(self):
@@ -113,7 +140,7 @@ class TestKindleReader:
                 "filter_frequent_words",
                 side_effect=lambda words: words,
             ):
-                words = reader.get_words_since_last_access()
+                words = words_of(reader.get_words_since_last_access())
 
             assert set(words) == {
                 "apple",
@@ -125,11 +152,52 @@ class TestKindleReader:
             assert words.count("prevaricate") == 1
             assert words.count("prefecture") == 1
 
+    def test_the_sentence_the_word_was_met_in_comes_with_it(self):
+        """The sense a card needs is in the sentence, not in the word."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            reader = self._make_reader(temp_dir)
+            self._insert(
+                reader,
+                [("4", "Cowed", "cow", "en", 0, 1705323000000, "profile1")],
+            )
+
+            with patch.object(
+                reader.frequent_words_manager,
+                "filter_frequent_words",
+                side_effect=lambda w: w,
+            ):
+                lookups = reader.get_words_since_last_access()
+
+            cow = next(item for item in lookups if item.word == "cow")
+            assert cow.sentence == "A sentence about Cowed."
+
+    def test_a_word_looked_up_twice_keeps_its_latest_sentence(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            reader = self._make_reader(temp_dir)
+            self._insert(
+                reader,
+                [
+                    ("4", "spar", "spar", "en", 0, 1705323000000, "profile1"),
+                    ("5", "spars", "spars", "en", 0, 1705326600000, "profile1"),
+                ],
+            )
+
+            with patch.object(
+                reader.frequent_words_manager,
+                "filter_frequent_words",
+                side_effect=lambda w: w,
+            ):
+                lookups = reader.get_words_since_last_access()
+
+            spar = [item for item in lookups if item.word == "spar"]
+            assert len(spar) == 1
+            assert spar[0].sentence == "A sentence about spars."
+
     def test_get_words_since_last_access_with_date_filter(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             reader = self._make_reader(temp_dir)
             reader.last_access_manager.write(datetime(2024, 1, 15, 14, 0))
-            words = reader.get_words_since_last_access()
+            words = words_of(reader.get_words_since_last_access())
             assert len(words) == 0
 
     def test_get_random_test_words(self):
@@ -140,7 +208,7 @@ class TestKindleReader:
                 "filter_frequent_words",
                 side_effect=lambda w: w,
             ):
-                words = reader.get_random_test_words(2)
+                words = words_of(reader.get_random_test_words(2))
                 assert len(words) == 2
                 assert all(w in ["apple", "banana", "cherry"] for w in words)
 
@@ -206,7 +274,7 @@ class TestLanguageFilter:
             "filter_frequent_words",
             side_effect=lambda w: w,
         ):
-            return reader.get_words_since_last_access()
+            return words_of(reader.get_words_since_last_access())
 
     def test_keeps_only_the_chosen_language(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -237,7 +305,7 @@ class TestLanguageFilter:
                 "filter_frequent_words",
                 side_effect=lambda w: w,
             ):
-                assert reader.get_random_test_words(10) == ["Schadenfreude"]
+                assert words_of(reader.get_random_test_words(10)) == ["Schadenfreude"]
 
 
 class TestKindleStemFailures:
@@ -266,7 +334,7 @@ class TestKindleStemFailures:
             "filter_frequent_words",
             side_effect=lambda w: w,
         ):
-            return reader.get_words_since_last_access()
+            return words_of(reader.get_words_since_last_access())
 
     @pytest.mark.parametrize("word,stem,base", KINDLE_MISSES)
     def test_an_inflected_stem_is_reduced_to_its_base(self, word, stem, base):
@@ -311,4 +379,4 @@ class TestKindleStemFailures:
                 "filter_frequent_words",
                 side_effect=lambda w: w,
             ):
-                assert reader.get_words_since_last_access() == ["inja"]
+                assert words_of(reader.get_words_since_last_access()) == ["inja"]

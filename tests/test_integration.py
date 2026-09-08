@@ -2,19 +2,25 @@ import tempfile
 import os
 import csv
 from unittest.mock import patch
-from csv_exporter import CSVExporter
+from ankindle import csv_exporter
+from ankindle.definition_curator import Lookup
+from ankindle.csv_exporter import CSVExporter
+
+
+def lookups(words: list[str]) -> list[Lookup]:
+    return [Lookup(word, f"A sentence using {word}.") for word in words]
 
 
 class TestIntegration:
     def test_export_workflow_with_mocked_dictionary(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             exporter = CSVExporter(output_dir=temp_dir)
-            words = ["testword1", "testword2", "testword3"]
+            words = lookups(["testword1", "testword2", "testword3"])
 
             with patch.object(
-                exporter.dictionary_service,
-                "get_definition",
-                side_effect=lambda w: f"Definition of {w}",
+                csv_exporter,
+                "get_definitions",
+                side_effect=lambda items: [f"Definition of {i.word}" for i in items],
             ):
                 csv_path = exporter.export_words_to_csv(words)
                 assert os.path.exists(csv_path)

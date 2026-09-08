@@ -2,18 +2,23 @@ import os
 from dataclasses import dataclass
 
 from anki.collection import Collection, SyncOutput
+from anki.consts import CARD_TYPE_NEW
 from anki.errors import BackendError, SyncError, SyncErrorKind
-from anki.notes import Note, NoteFieldsCheckResult
+from anki.notes import Note
 from anki.sync import SyncAuth
 
-from config import COLLECTION_PATH, DEFAULT_AUTH_FILE
-from errors import AnkiSyncError, FullSyncRequiredError
+from ankindle.config import COLLECTION_PATH, DEFAULT_AUTH_FILE
+from ankindle.errors import AnkiSyncError, FullSyncRequiredError
 
 # The note type words are written as. Change these three together to move to a
 # custom note type; nothing else in the app knows the field names.
 NOTETYPE = "Basic"
 FRONT_FIELD = "Front"
 BACK_FIELD = "Back"
+
+# Anki fields are HTML, so a newline between two definitions would render as a
+# space and run them into each other.
+DEFINITION_SEPARATOR = "<br>"
 
 CHANGES = SyncOutput.ChangesRequired
 
@@ -45,13 +50,17 @@ FULL_UPLOAD_MESSAGE = (
 @dataclass
 class AddSummary:
     added: int = 0
-    duplicates: int = 0
+    updated: int = 0
+    relearning: int = 0
+    unchanged: int = 0
     without_definition: int = 0
 
     def __str__(self) -> str:
         return (
             f"added {self.added}, "
-            f"skipped {self.duplicates} already present, "
+            f"{self.updated} updated with a new sense, "
+            f"{self.relearning} sent back to relearn, "
+            f"{self.unchanged} unchanged, "
             f"{self.without_definition} had no definition"
         )
 
@@ -88,6 +97,16 @@ class AnkiCollection:
     def is_empty(self) -> bool:
         """Nothing here yet, so a download cannot discard anything."""
         return self.collection.note_count() == 0
+
+    def decks(self) -> list[tuple[str, int]]:
+        """Every deck with the cards in it; a subdeck is counted on its own."""
+        return [
+            (
+                deck.name,
+                self.collection.decks.card_count(deck.id, include_subdecks=False),
+            )
+            for deck in self.collection.decks.all_names_and_ids()
+        ]
 
     def sync(self, auth: SyncAuth) -> SyncAuth:
         """One round trip. Backs up first, and never uploads over AnkiWeb.
@@ -132,7 +151,12 @@ class AnkiCollection:
     def add_words(
         self, deck_name: str, words: list[tuple[str, str | None]]
     ) -> AddSummary:
-        """Add each word/definition pair as a note, skipping ones already there."""
+        """Add each word/definition pair, growing the cards already there.
+
+        A word is only new once. Met again it brings the sense of a different
+        sentence, so it is appended to the card that exists rather than
+        skipped, wherever in the collection that card lives.
+        """
         deck_id = self.collection.decks.id(deck_name)
         notetype = self.collection.models.by_name(NOTETYPE)
         if notetype is None:
@@ -141,23 +165,71 @@ class AnkiCollection:
                 "or point NOTETYPE in anki_sync.py at the one you use."
             )
 
+        known = self._notes_by_word(notetype)
         summary = AddSummary()
         for word, definition in words:
-            note = self.collection.new_note(notetype)
-            self._fill(note, word, definition)
-
-            if note.duplicate_or_empty() == NoteFieldsCheckResult.DUPLICATE:
-                summary.duplicates += 1
-                continue
-
-            self.collection.add_note(note, deck_id)
-            summary.added += 1
-            if not definition:
-                summary.without_definition += 1
+            note = known.get(word.casefold())
+            if note is None:
+                known[word.casefold()] = self._add(
+                    notetype, deck_id, word, definition, summary
+                )
+            else:
+                self._append(note, definition, summary)
 
         return summary
 
-    def _fill(self, note: Note, word: str, definition: str | None) -> None:
+    def _notes_by_word(self, notetype: dict) -> dict[str, Note]:
+        """Every word the collection already holds, whatever its case or deck.
+
+        Kindle hands back words it has handed back before, so the whole note
+        type is indexed once instead of searched for once per word.
+        """
+        known: dict[str, Note] = {}
+        for note_id in self.collection.models.nids(notetype):
+            note = self.collection.get_note(note_id)
+            known.setdefault(note[FRONT_FIELD].casefold(), note)
+        return known
+
+    def _add(
+        self,
+        notetype: dict,
+        deck_id: int,
+        word: str,
+        definition: str | None,
+        summary: AddSummary,
+    ) -> Note:
+        note = self.collection.new_note(notetype)
         note[FRONT_FIELD] = word
         # A card the user has to finish beats a word they never hear about again.
         note[BACK_FIELD] = definition or ""
+        self.collection.add_note(note, deck_id)
+
+        summary.added += 1
+        if not definition:
+            summary.without_definition += 1
+        return note
+
+    def _append(
+        self, note: Note, definition: str | None, summary: AddSummary
+    ) -> None:
+        """Add the sense to the card, and put a learnt card back in the queue.
+
+        A card the user has already seen was learnt with a meaning that has
+        since grown, so it goes back through Anki's own "forget" - out of the
+        schedule and into the new queue, to be learnt again as it now reads. A
+        card still waiting to be seen for the first time is left where it is:
+        the user will meet the whole of it soon enough.
+        """
+        back = note[BACK_FIELD]
+        if not definition or definition in back:
+            summary.unchanged += 1
+            return
+
+        note[BACK_FIELD] = f"{back}{DEFINITION_SEPARATOR}{definition}" if back else definition
+        self.collection.update_note(note)
+        summary.updated += 1
+
+        seen = [card.id for card in note.cards() if card.type != CARD_TYPE_NEW]
+        if seen:
+            self.collection.sched.schedule_cards_as_new(seen)
+            summary.relearning += 1

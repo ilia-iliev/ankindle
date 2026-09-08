@@ -1,7 +1,7 @@
 import os
 import glob
 
-from errors import KindleNotAttachedError, KindleNotReadableError
+from ankindle.errors import KindleNotAttachedError, KindleNotReadableError
 
 
 KINDLE_MOUNT_PATHS = [

@@ -8,14 +8,14 @@ import time
 import pytest
 from anki.collection import Collection
 
-from anki_sync import (
+from ankindle.anki_sync import (
     DEFAULT_ENDPOINT,
     FRONT_FIELD,
     NOTETYPE,
     AnkiCollection,
     auth_from_key,
 )
-from errors import AnkiSyncError, FullSyncRequiredError
+from ankindle.errors import AnkiSyncError, FullSyncRequiredError
 
 USERNAME = "tester"
 PASSWORD = "secret"
@@ -146,7 +146,7 @@ class TestSync:
         second.sync(auth)
         second.close()
 
-        assert (summary.added, summary.duplicates) == (1, 1)
+        assert (summary.added, summary.unchanged) == (1, 1)
         assert words_on_server(endpoint, base) == [
             "existing-one",
             "existing-two",

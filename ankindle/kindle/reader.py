@@ -3,9 +3,10 @@ import sqlite3
 import random
 from datetime import datetime
 
-from config import DATA_DIR
-from frequent_words import FrequentWordsManager
-from lemmatizer import Lemmatizer
+from ankindle.config import DATA_DIR
+from ankindle.definition_curator import Lookup
+from ankindle.frequent_words import FrequentWordsManager
+from ankindle.lemmatizer import Lemmatizer
 
 
 DEFAULT_LAST_ACCESS_FILE = os.path.join(DATA_DIR, "last_access.txt")
@@ -62,19 +63,20 @@ class KindleReader:
         with sqlite3.connect(self.database_path) as conn:
             rows = conn.execute(
                 """
-                SELECT word, stem, lang, timestamp
-                FROM WORDS
-                WHERE word IS NOT NULL AND timestamp > 0
-                ORDER BY timestamp DESC
+                SELECT w.word, w.stem, w.lang, w.timestamp, l.usage
+                FROM WORDS w
+                LEFT JOIN LOOKUPS l ON l.word_key = w.id
+                WHERE w.word IS NOT NULL AND w.timestamp > 0
+                ORDER BY w.timestamp DESC
                 """
             ).fetchall()
 
         return [
             {
-                "word": self._base_form(word, stem),
+                "lookup": Lookup(self._base_form(word, stem), (usage or "").strip()),
                 "timestamp": datetime.fromtimestamp(timestamp / 1000),
             }
-            for word, stem, lang, timestamp in rows
+            for word, stem, lang, timestamp, usage in rows
             if word and timestamp and self._is_wanted_language(lang)
         ]
 
@@ -94,20 +96,20 @@ class KindleReader:
             return False
         return lang.strip().casefold().split("-")[0] == self.language.casefold()
 
-    def get_words_since_last_access(self) -> list[str]:
+    def get_words_since_last_access(self) -> list[Lookup]:
         read_moment = datetime.now()
         all_words = self._read_kindle_database()
         last_access = self.last_access_manager.read()
 
         if last_access is None:
-            words = [item["word"] for item in all_words]
+            lookups = [item["lookup"] for item in all_words]
         else:
-            words = [
-                item["word"] for item in all_words if item["timestamp"] > last_access
+            lookups = [
+                item["lookup"] for item in all_words if item["timestamp"] > last_access
             ]
 
         self._pending_last_access = read_moment
-        return self._filter_and_deduplicate(words)
+        return self._filter_and_deduplicate(lookups)
 
     def set_last_access(self, moment: datetime) -> None:
         self.last_access_manager.write(moment)
@@ -118,21 +120,32 @@ class KindleReader:
         self.last_access_manager.write(self._pending_last_access)
         self._pending_last_access = None
 
-    def get_random_test_words(self, count: int = 10) -> list[str]:
+    def get_random_test_words(self, count: int = 10) -> list[Lookup]:
         all_words = self._read_kindle_database()
-        filtered = self._filter_and_deduplicate([item["word"] for item in all_words])
+        filtered = self._filter_and_deduplicate(
+            [item["lookup"] for item in all_words]
+        )
 
         if count >= len(filtered):
             return filtered
         return random.sample(filtered, count)
 
-    def _filter_and_deduplicate(self, words: list[str]) -> list[str]:
-        filtered = self.frequent_words_manager.filter_frequent_words(words)
+    def _filter_and_deduplicate(self, lookups: list[Lookup]) -> list[Lookup]:
+        """The most recent lookup of each word, commonest words dropped.
+
+        Rows arrive newest first and a word looked up twice brings a sentence
+        each time, so keeping the first occurrence keeps the latest sentence.
+        """
+        wanted = set(
+            self.frequent_words_manager.filter_frequent_words(
+                [lookup.word for lookup in lookups]
+            )
+        )
         seen: set[str] = set()
-        unique_words = []
-        for word in filtered:
-            key = word.casefold()
-            if key not in seen:
+        unique_lookups = []
+        for lookup in lookups:
+            key = lookup.word.casefold()
+            if lookup.word in wanted and key not in seen:
                 seen.add(key)
-                unique_words.append(word)
-        return unique_words
+                unique_lookups.append(lookup)
+        return unique_lookups

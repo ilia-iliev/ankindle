@@ -1,7 +1,7 @@
 [project]
-name = "kindle-to-anki"
+name = "ankindle"
 version = "0.1.0"
-description = "Application that reads Kindle highlights and prepares them for AnkiDroid import"
+description = "Command line tool that turns Kindle word lookups into Anki cards"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -11,6 +11,16 @@ dependencies = [
     "requests==2.34.2",
     "simplemma==2.0.0",
 ]
+
+[project.scripts]
+ankindle = "ankindle.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["ankindle"]
 
 [project.optional-dependencies]
 dev = [

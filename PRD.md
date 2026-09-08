@@ -15,16 +15,18 @@ Application that reads user highlights (tap and hold on words) on Kindle. These 
 2.2 Keep only lookups in the chosen language. `vocab.db` pools every language the user has ever looked a word up in; the rest are dropped rather than pushed through an English dictionary.
 
 ## 3. Import into existing anki list
-3.1 For each word, add a definition from dictionaryapi.dev. A word the dictionary has no entry for is still added, with a blank back, so it is never lost silently.
+3.1 For each word, add a definition written by a local LLM, in the sense the sentence the word was looked up in actually used - `vocab.db` stores that sentence for every lookup, and a reader stops at a word because of its unusual sense, not its common one: the common modern sense, at most three, in a phrase or one short sentence. A word it has nothing useful to say about is still added, with a blank back, so it is never lost silently.
 
-3.1.1 A dictionary outage is not the same as a missing entry. If the service stops answering, abandon the run rather than adding a batch of blank cards that deduplication would stop a later run from filling in. The words stay pending.
+3.1.1 An unreachable model is not the same as a word without a useful definition. If the API stops answering, abandon the run rather than adding a batch of blank cards that deduplication would stop a later run from filling in. The words stay pending.
 
 3.2 Keep a local Anki collection that acts as another device on the user's AnkiWeb account. Per run: sync down, add the new words to the target deck as Basic notes, sync up.
 
 3.3 Never resolve a full sync without the user, with one exception: when the local collection is empty there is nothing a download can discard, so first contact downloads automatically. AnkiWeb reports this case as FULL_SYNC rather than FULL_DOWNLOAD. Anything that would upload over the account aborts and asks the user to settle it in AnkiDroid or desktop Anki.
 
-3.6 `--no-definitions` adds the words without looking them up, for when the dictionary is down and the words are wanted anyway.
+3.6 `--no-definitions` adds the words without defining them, for when the model is unreachable and the words are wanted anyway.
 
 3.4 Deduplicate in three layers: within the batch, across inflections, and against notes already in the collection. Kindle's `stem` is a stemmer, not a lemmatizer, and hands back inflections such as `spars`, so it is lemmatized before anything is compared. Every form of a word has to reduce to the same string or it becomes a second card.
+
+3.7 The target deck is asked for once, listing the decks on the account, and remembered from then on. A name that is not on the list is a new deck, taken only after a confirmation. `--deck` skips the question and resets what is remembered.
 
 3.5 `--csv` writes `word;definition` to `words.csv` as a fallback when syncing is not wanted.

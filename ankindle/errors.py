@@ -6,15 +6,11 @@ class KindleNotReadableError(Exception):
     pass
 
 
-class DictionaryServiceError(Exception):
-    pass
-
-
-class DictionaryUnavailableError(DictionaryServiceError):
-    pass
-
-
 class DefinitionCurationError(Exception):
+    pass
+
+
+class DefinitionsUnavailableError(DefinitionCurationError):
     pass
 
 

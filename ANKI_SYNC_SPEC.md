@@ -18,7 +18,7 @@ CSV stays as a fallback. `.apkg` export is a nice-to-have for later, explicitly
 ## Shape of the solution
 
 The app keeps its own Anki collection at
-`~/.local/share/kindle-to-anki/collection.anki2` (via `platformdirs`) and acts as
+`~/.local/share/ankindle/collection.anki2` (via `platformdirs`) and acts as
 just another device on the user's AnkiWeb account, exactly like their phone.
 
 Per run: sync down -> add new notes to the target deck -> sync up.
@@ -87,7 +87,7 @@ lookups.
 on a `FULL_SYNC` abort or any other failure.
 
 This pattern already exists for the CSV path — `get_words_since_last_access()`
-stashes the read moment in `_pending_last_access`, and `main.py` calls
+stashes the read moment in `_pending_last_access`, and `commands.run_sync` calls
 `commit_last_access()` only once the export succeeded. Port it, do not reinvent
 it.
 
@@ -158,7 +158,7 @@ clients that fall too far behind, so it will need bumping occasionally.
 
 Committed this session:
 
-- `--since YYYY-MM-DD` on `main.py`, plus a first-run prompt
+- `--since YYYY-MM-DD` on `ankindle sync`, plus a first-run prompt
   (`prompt_for_start_date`, `configure_last_access`) when no state file exists.
   Blank answer requires an explicit `y` to start fresh; a bad date re-asks.
 - `LastAccessManager` stores real `datetime` objects via ISO, not strings, so the

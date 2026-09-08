@@ -1,6 +1,6 @@
 import pytest
 
-from lemmatizer import Lemmatizer
+from ankindle.lemmatizer import Lemmatizer
 
 
 class TestKindleStemsThatNeedAnotherPass:

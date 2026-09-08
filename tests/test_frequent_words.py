@@ -3,13 +3,13 @@ import os
 import json
 from unittest.mock import patch, MagicMock
 from datetime import datetime, timedelta
-from frequent_words import FrequentWordsManager
+from ankindle.frequent_words import FrequentWordsManager
 
 
 class TestFrequentWordsManager:
     def test_download_frequent_words(self):
         manager = FrequentWordsManager()
-        with patch("frequent_words.requests.get") as mock_get:
+        with patch("ankindle.frequent_words.requests.get") as mock_get:
             mock_response = MagicMock()
             mock_response.text = "the\nbe\nto\nof\nand\nin\nthat\nhave\nit\nfor"
             mock_response.status_code = 200

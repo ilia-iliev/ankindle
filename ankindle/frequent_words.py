@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from platformdirs import user_cache_dir
 
 DEFAULT_CACHE_FILE = os.path.join(
-    user_cache_dir("kindle-to-anki"), "frequent_words.json"
+    user_cache_dir("ankindle"), "frequent_words.json"
 )
 
 

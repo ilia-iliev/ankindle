@@ -1,1 +1,1 @@
-# Tests package for kindle-to-anki
+# Tests package for ankindle

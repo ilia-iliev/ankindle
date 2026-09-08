@@ -3,8 +3,14 @@ import tempfile
 import os
 import csv
 from unittest.mock import patch
-from csv_exporter import CSVExporter
-from errors import CSVExportError
+from ankindle import csv_exporter
+from ankindle.definition_curator import Lookup
+from ankindle.csv_exporter import CSVExporter
+
+
+def lookups(words: list[str]) -> list[Lookup]:
+    return [Lookup(word, f"A sentence using {word}.") for word in words]
+from ankindle.errors import CSVExportError
 
 
 class TestCSVExporter:
@@ -20,11 +26,11 @@ class TestCSVExporter:
         with tempfile.TemporaryDirectory() as temp_dir:
             exporter = CSVExporter(output_dir=temp_dir)
             with patch.object(
-                exporter.dictionary_service,
-                "get_definition",
-                side_effect=lambda w: f"def of {w}",
+                csv_exporter,
+                "get_definitions",
+                side_effect=lambda items: [f"def of {i.word}" for i in items],
             ):
-                csv_path = exporter.export_words_to_csv(["hello", "world"])
+                csv_path = exporter.export_words_to_csv(lookups(["hello", "world"]))
                 assert os.path.exists(csv_path)
 
                 with open(csv_path, "r", newline="", encoding="utf-8") as f:
@@ -38,11 +44,13 @@ class TestCSVExporter:
         with tempfile.TemporaryDirectory() as temp_dir:
             exporter = CSVExporter(output_dir=temp_dir)
             with patch.object(
-                exporter.dictionary_service,
-                "get_definition",
-                side_effect=lambda w: "a def" if w == "hello" else None,
+                csv_exporter,
+                "get_definitions",
+                side_effect=lambda items: [
+                    "a def" if i.word == "hello" else None for i in items
+                ],
             ):
-                csv_path = exporter.export_words_to_csv(["hello", "unknown"])
+                csv_path = exporter.export_words_to_csv(lookups(["hello", "unknown"]))
 
                 with open(csv_path, "r", newline="", encoding="utf-8") as f:
                     rows = list(csv.reader(f, delimiter=";"))
@@ -69,27 +77,25 @@ class TestCSVExporter:
     def test_export_permission_error(self):
         exporter = CSVExporter()
         with (
-            patch.object(
-                exporter.dictionary_service, "get_definitions", return_value=["a def"]
-            ),
+            patch.object(csv_exporter, "get_definitions", return_value=["a def"]),
             patch("builtins.open", side_effect=PermissionError("denied")),
         ):
             with pytest.raises(CSVExportError):
-                exporter.export_words_to_csv(["hello"])
+                exporter.export_words_to_csv(lookups(["hello"]))
 
     def test_validates_input(self):
         exporter = CSVExporter()
         with pytest.raises(ValueError):
             exporter.export_words_to_csv("not a list")
         with pytest.raises(ValueError):
-            exporter.export_words_to_csv([123])
-        with pytest.raises(ValueError):
-            exporter.export_words_to_csv(["hello", ""])
+            exporter.export_words_to_csv(lookups(["hello", ""]))
 
-    def test_export_with_real_dictionary(self):
+    @pytest.mark.live
+    def test_export_with_a_real_model(self):
+        """Asks the real model. Deselected by default; run with -m live."""
         with tempfile.TemporaryDirectory() as temp_dir:
             exporter = CSVExporter(output_dir=temp_dir)
-            csv_path = exporter.export_words_to_csv(["hello"])
+            csv_path = exporter.export_words_to_csv(lookups(["hello"]))
             assert os.path.exists(csv_path)
 
             with open(csv_path, "r", newline="", encoding="utf-8") as f:
