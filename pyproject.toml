@@ -5,6 +5,7 @@ description = "Application that reads Kindle highlights and prepares them for An
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "anki>=26.8.1",
     "platformdirs>=4.9.6",
     "pytest>=7.0.0",
     "requests>=2.31.0",
@@ -21,3 +22,7 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
+addopts = "-m 'not live'"
+markers = [
+    "live: hits a real network service; deselected by default, run with -m live",
+]

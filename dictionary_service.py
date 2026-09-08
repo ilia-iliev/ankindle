@@ -3,7 +3,13 @@ import time
 from collections import deque
 from urllib.parse import quote
 
-from errors import DictionaryServiceError
+from errors import DictionaryServiceError, DictionaryUnavailableError
+
+SERVICE_DOWN_MESSAGE = (
+    "dictionaryapi.dev is not responding, so every remaining word would come "
+    "back blank. Nothing was added and the last-run marker was left alone - run "
+    "this again once the service is back."
+)
 
 CATEGORY_MAP = {
     "verb": "v",
@@ -38,13 +44,19 @@ class RateLimiter:
 class DictionaryService:
     BASE_URL = "https://api.dictionaryapi.dev/api/v2/entries/en"
 
-    def __init__(self, max_requests_per_second: int = 10, max_retries: int = 3):
+    def __init__(
+        self,
+        max_requests_per_second: int = 10,
+        max_retries: int = 3,
+        max_consecutive_failures: int = 3,
+    ):
         self.session = requests.Session()
         self.session.headers.update(
             {"User-Agent": "KindleToAnki/1.0 (Educational Tool)"}
         )
         self.rate_limiter = RateLimiter(max_requests_per_second)
         self.max_retries = max_retries
+        self.max_consecutive_failures = max_consecutive_failures
         self.timeout = 10
 
     def get_definition(self, word: str) -> str | None:
@@ -89,12 +101,31 @@ class DictionaryService:
         )
 
     def get_definitions(self, words: list[str]) -> list[str | None]:
-        results = []
+        """Look every word up, giving up once the service itself looks down.
+
+        Each failed word costs a full retry cycle, so a dead API turns a long
+        backlog into hours of waiting. Enough failures in a row means the words
+        are unanswered rather than undefined, and adding them blank would burn
+        them: deduplication makes a later run skip them instead of filling them
+        in. So the run is abandoned and the words stay pending.
+        """
+        results: list[str | None] = []
+        consecutive_failures = 0
+
         for word in words:
+            if consecutive_failures >= self.max_consecutive_failures:
+                raise DictionaryUnavailableError(SERVICE_DOWN_MESSAGE)
+
             try:
                 results.append(self.get_definition(word))
+                consecutive_failures = 0
             except DictionaryServiceError:
                 results.append(None)
+                consecutive_failures += 1
+
+            print(f"\r  {len(results)}/{len(words)}", end="", flush=True)
+
+        print()
         return results
 
     def _extract_definition(self, data: list) -> str | None:
