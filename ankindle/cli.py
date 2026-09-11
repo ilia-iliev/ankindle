@@ -1,6 +1,6 @@
 import argparse
 
-from ankindle.commands import run_auth, run_lists, run_sync
+from ankindle.commands import run_auth, run_config, run_lists, run_sync
 from ankindle.errors import (
     AnkiSyncError,
     DefinitionCurationError,
@@ -9,6 +9,7 @@ from ankindle.errors import (
 )
 from ankindle.kindle.detector import KindleDetector
 from ankindle.kindle.reader import DEFAULT_LANGUAGE
+from ankindle.model import DEFAULT_URL
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -25,6 +26,10 @@ def build_parser() -> argparse.ArgumentParser:
     commands.add_parser(
         "lists",
         help="Show the decks on the AnkiWeb account, with their card counts.",
+    )
+    commands.add_parser(
+        "config",
+        help="Show the settings a run would use, and where each comes from.",
     )
 
     sync = commands.add_parser(
@@ -58,6 +63,25 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     sync.add_argument(
+        "--model-url",
+        type=str,
+        metavar="URL",
+        help=(
+            "Base URL of any OpenAI-compatible server - Ollama, llama.cpp, LM "
+            "Studio, vLLM, OpenAI, OpenRouter (default: "
+            f"{DEFAULT_URL}). Remembered after the first run."
+        ),
+    )
+    sync.add_argument(
+        "--model",
+        type=str,
+        metavar="NAME",
+        help=(
+            "Model that writes the definitions. Asked for, from the ones the "
+            "server lists, when neither given nor remembered."
+        ),
+    )
+    sync.add_argument(
         "--test", action="store_true", help="Fetch random 10 words for testing"
     )
     sync.add_argument(
@@ -86,6 +110,8 @@ def dispatch(args) -> None:
         run_auth()
     elif args.command == "lists":
         run_lists()
+    elif args.command == "config":
+        run_config()
     else:
         run_sync(args)
 

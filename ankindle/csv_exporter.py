@@ -4,10 +4,12 @@ import re
 from ankindle.definition_curator import Lookup
 from ankindle.definitions import get_definitions
 from ankindle.errors import CSVExportError
+from ankindle.model import ModelSettings
 
 
 class CSVExporter:
-    def __init__(self, output_dir: str | None = None):
+    def __init__(self, settings: ModelSettings, output_dir: str | None = None):
+        self.settings = settings
         self.output_dir = output_dir or os.getcwd()
 
     def export_words_to_csv(self, lookups: list) -> str:
@@ -24,7 +26,7 @@ class CSVExporter:
             Lookup(re.sub(r"\s+", " ", lookup.word.strip()), lookup.sentence)
             for lookup in lookups
         ]
-        definitions = get_definitions(cleaned)
+        definitions = get_definitions(cleaned, self.settings)
 
         try:
             with open(csv_path, "w", newline="", encoding="utf-8") as csvfile:

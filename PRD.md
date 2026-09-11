@@ -15,7 +15,7 @@ Application that reads user highlights (tap and hold on words) on Kindle. These 
 2.2 Keep only lookups in the chosen language. `vocab.db` pools every language the user has ever looked a word up in; the rest are dropped rather than pushed through an English dictionary.
 
 ## 3. Import into existing anki list
-3.1 For each word, add definitions written by a local LLM. Put the sense used by the lookup sentence first, followed by up to two useful, clearly distinct modern senses. Every sense has a compact part-of-speech tag. If the model has nothing useful to say, skip the word and print a warning that names it; never add a blank card.
+3.1 For each word, add definitions written by an LLM behind an OpenAI-compatible API - local or hosted, chosen by the user and never assumed. Put the sense used by the lookup sentence first, followed by up to two useful, clearly distinct modern senses. Every sense has a compact part-of-speech tag. If the model has nothing useful to say, skip the word and print a warning that names it; never add a blank card.
 
 3.1.1 An unreachable model is not the same as a word without a useful definition. If the API stops answering, abandon the run rather than adding a batch of blank cards that deduplication would stop a later run from filling in. The words stay pending.
 

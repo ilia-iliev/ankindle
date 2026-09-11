@@ -1,342 +1,178 @@
 # ankindle
 
-A command line tool that reads the words you looked up on your Kindle (tap and
-hold) and adds them to your Anki collection over AnkiWeb, so AnkiDroid picks them
-up on its next sync. No desktop Anki, no AnkiConnect, no importing files by hand.
+The words you tap-and-hold on a Kindle, as Anki cards.
 
-## Installation
+It reads the device's `vocab.db` and writes to your collection over AnkiWeb, so
+AnkiDroid picks the cards up on its next sync. No desktop Anki, no AnkiConnect,
+no CSV shuffling.
 
-This project uses `uv` for dependency management and Python virtual environments.
-
-Install it as a tool:
-
-```bash
-uv tool install .
+```
+vocab.db
+  → keep one language, drop the 1000 commonest words
+  → lemmatize, so every inflection lands on one card
+  → ask a model for the sense the sentence used
+  → sync down from AnkiWeb, add or grow notes, sync up
 ```
 
-Or work in a checkout, where every command below becomes `uv run ankindle ...`:
+## Install
+
+Needs Python 3.12+, [uv](https://docs.astral.sh/uv/), Linux, an AnkiWeb
+account, and a model to ask.
 
 ```bash
-uv sync
+uv tool install git+https://github.com/ilia-iliev/ankindle
 ```
 
-Definitions come from a local model behind an OpenAI-compatible API - vLLM,
-llama.cpp, Ollama, LM Studio. It defaults to `http://localhost:8081/v1`; point it
-elsewhere with the environment:
+## Use
 
 ```bash
-export ANKINDLE_MODEL_URL=http://my-gpu-box:8081/v1
-export ANKINDLE_MODEL=Qwen3.8-27B
-```
-
-## Usage
-
-Three commands:
-
-```bash
-ankindle auth     # log in to AnkiWeb
-ankindle lists    # show the decks on the account
+ankindle auth     # AnkiWeb login. Only the session key is kept, never the password
 ankindle sync     # read the Kindle, add the new words
+ankindle lists    # decks on the account, with a * on the one sync writes to
+ankindle config   # every setting, its value, and where it came from
 ```
 
-Log in once. Only the session key is stored, never the password:
-
-```
-$ ankindle auth
-
-AnkiWeb login. Asked once - only the session key is stored.
-AnkiWeb email: you@example.com
-Logging in as you@example.com
-AnkiWeb password:
-Logged in. The session key is stored; the password is not.
-```
-
-Then plug in the Kindle and sync. The first run asks which deck the words go to,
-and where to start reading from:
-
-```
-$ ankindle sync
-
-Which deck should the words go to?
-  1. Default
-  2. Kindle Words
-  3. Spanish::Verbs
-Deck [number, or a new name]: 2
-```
-
-A name that is not on the list is a new deck, after a confirmation. Or name the
-deck up front and skip the question:
-
-```bash
-ankindle sync --deck "Kindle Words"
-```
-
-Either way the deck is remembered, along with the language, so after that it is
-just:
-
-```bash
-ankindle sync
-```
-
-Nothing is guessed silently: a run says what it settled on before it touches the
-Kindle,
+The first `sync` asks which deck, which model, and how far back to read. All of
+it is remembered, so from then on the whole workflow is `ankindle sync`. It says
+what it settled on before it touches anything:
 
 ```
 Language 'en', into deck 'Kindle Words'.
+Definitions from qwen3:30b at http://localhost:11434/v1.
 Kindle found at: /run/media/you/Kindle
-```
-
-and `ankindle lists` marks the deck that words are going to:
-
-```
-$ ankindle lists
-
-  Default              0
-* Kindle Words       412
-  Spanish::Verbs      88
-
-* is where 'ankindle sync' files words. Change it with --deck.
-```
-
-Output ends with a summary:
-
-```
+...
 Deck 'Kindle Words': added 12, 3 updated with a new sense, 2 sent back to
 relearn, 4 unchanged, 1 skipped without definition
 ```
 
-`auth` is optional — `lists` and `sync` ask for the login themselves when there
-is no key stored. Run it directly to log in again after a password change.
+`auth` is optional: `sync` and `lists` ask for the login themselves when no key
+is stored. Run it directly after a password change.
 
-### What it does
+## The model
 
-1. Check if a Kindle device is attached and accessible
-2. Read the Kindle vocabulary database to extract looked-up words
-3. Keep only lookups in the chosen language (`--lang`, default `en`) — `vocab.db`
-   pools every language you have ever looked a word up in
-4. Normalize inflected lookups to one base form and remove duplicates. Kindle's
-   own `stem` column is only a first pass — it leaves `spars` as `spars` — so it
-   is run through a dictionary lemmatizer as well (`spars` → `spar`, `hoarier` →
-   `hoary`). A language the lemmatizer has no dictionary for keeps Kindle's stem
-5. Filter out common words (like 'the', 'be', 'to', 'of', 'and', etc.)
-6. Ask the local model for the sentence's sense first, plus up to two useful,
-   distinct modern senses, with a part-of-speech tag on each
-7. Sync down from AnkiWeb, add the new words as Basic notes (word → `Front`,
-   definition → `Back`), grow the cards that are already there, sync back up
+Anything that speaks the OpenAI chat completions API. Ollama, llama.cpp, LM
+Studio or vLLM locally; OpenAI, OpenRouter, Groq or a company gateway remotely.
+The default is Ollama on this machine. Anything else is one flag, once:
 
-### `sync` options
+```bash
+ankindle sync --model-url http://gpu-box:8081/v1 --model Qwen3-30B
 
-| Flag | What it does |
+export ANKINDLE_API_KEY=sk-...        # never written to disk; hosted only
+ankindle sync --model-url https://openrouter.ai/api/v1 --model qwen/qwen3-30b
+```
+
+Leave `--model` out and the first run lists what the server is serving and asks.
+
+Servers disagree about how you may ask for JSON, so it asks for a strict schema,
+then `json_object`, then nothing, stepping down on each 400 and saying so. The
+prompt states the shape anyway.
+
+The rest lives in the config file, and every key also works as `ANKINDLE_<NAME>`
+in the environment:
+
+| Key | |
 | --- | --- |
-| `--deck NAME` | Deck the words are added to. Asked for when neither given nor remembered. |
-| `--lang CODE` | Only export lookups in this language, as Kindle records it (default `en`). Remembered after the first run. |
-| `--since YYYY-MM-DD` | Export words looked up after this date, and record it as the new starting point. |
-| `--no-definitions` | Skip model lookup and add nothing. Warns and leaves the last-run marker unchanged. |
-| `--csv` | Write `words.csv` instead of syncing. |
-| `--output-dir DIR` | Where `--csv` writes (default: current directory). |
-| `--test` | Fetch 10 random words. Does not move the last-run marker. |
+| `batch_size` | 25. One request per word re-reads the instructions for nothing; one request for a long backlog comes back shuffled. |
+| `max_tokens` `timeout` `temperature` | 8000, 300s, 0.2. |
+| `json_mode` | `schema`, `object` or `none`, to skip the negotiation above. |
+| `disable_thinking` | Sends `chat_template_kwargs.enable_thinking=false`, which vLLM and SGLang pass to the chat template. Reasoning models otherwise spend the whole budget deciding which sense of *fell* matters and never answer. Elsewhere, turn thinking off on the server. |
 
-### Definitions
+## Why a model and not a dictionary
 
-There is no dictionary API in the loop. A dictionary entry is a pile of senses -
-archaic, dialectal, specialised, near-duplicate - and a flashcard wants a small,
-useful selection.
+A dictionary entry is a pile of senses — archaic, dialectal, specialised,
+near-duplicate — and a flashcard wants two or three of them.
 
-Which one is not a guess, because `vocab.db` also stores the sentence each word
-was met in, and the word goes to the model with it. You do not tap a word whose
+Which two is not a guess. `vocab.db` stores the sentence each word was met in,
+and that sentence goes to the model with the word. You don't tap a word whose
 ordinary meaning you know, so the sense you want is usually not the common one:
-"Cowed by the President" wants *to intimidate*, not the animal, and "a slough of
-despond" wants *despair*, not a swamp. Given the sentence, the model puts that sense first, then may include up to two
-other common, contemporary and clearly distinct senses. Every sense carries a
-compact part-of-speech tag such as `(n)`, `(v)` or `(adj)`. The sentence itself
-is never sent to Anki - it selects the primary sense, and the card stays word to
-definition.
+"Cowed by the President" wants *to intimidate*, not the animal. The model puts
+that sense first and may add up to two other distinct modern ones, each tagged
+`(n)`, `(v)`, `(adj)`. The sentence itself never reaches Anki — it picks the
+sense, and the card stays word → definition.
 
-`ankindle/definition_curator.py` holds the prompt, the response parser and the
-Anki formatter, and knows nothing about who answers it; `ankindle/definitions.py`
-is the HTTP adapter and the batching around it. A word looked up twice keeps the
-sentence from the most recent lookup. Words go 25 at a time - one
-request per word re-reads the instructions every time, and one request for a long
-backlog risks the answers coming back out of order. A 25-word batch costs about a
-minute on a 27B model.
+Answers are matched back by the word, not by position, so the model may reorder
+them freely. A word it drops is asked again on its own; only a word ignored
+twice stops the run.
 
-Answers are matched back to words by the word itself, so the model is free to
-reorder them; a word it drops is asked about again on its own, and only a word
-it ignores twice stops the run. The expected shape is:
+## What it refuses to do
 
-```json
-{
-  "items": [
-    {
-      "word": "blather",
-      "senses": [
-        {
-          "part_of_speech": "v",
-          "definition": "To talk at length without making much sense"
-        },
-        {
-          "part_of_speech": "n",
-          "definition": "Long, foolish or meaningless talk"
-        }
-      ]
-    }
-  ]
-}
-```
+**Overwrite a card you already have.** A word looked up again in another book
+arrives with a different sentence and often a different sense, so the new
+definition is appended to the existing note, wherever it lives and whatever case
+it's filed under. If you'd already learnt that card, it goes back through Anki's
+*Forget* — out of the schedule, back to the new queue, history kept — because
+you learnt it with a meaning that has since grown.
 
-### A word you have looked up before
+**Write a blank card.** A word the model can't define is skipped and named in a
+warning.
 
-A word is only new once. Look it up again in a different book and Kindle sends
-it back, now with a different sentence and so, often, a different sense - and
-that sense is missing from the card you already have. So the new definition is
-appended to that card rather than thrown away, wherever in your collection the
-card lives, and whatever case it is filed under. A definition the card already
-carries is not added twice.
+**Burn the backlog on an outage.** An unreachable server is not the same as an
+undefined word. The first failed batch ends the run with nothing added and the
+last-run marker untouched, so the words are still pending next time. A server
+that answers but refuses says why: 401 names the key to set, 404 points at the
+missing `/v1`.
 
-What happens next depends on whether you have met the card yet:
+**Upload over your collection.** This app is just another device on the account.
+A full sync in the upload direction would replace AnkiWeb with this collection,
+so it's refused outright. First contact is the one exception — nothing here yet
+means a download can't discard anything — and a genuine divergence aborts for
+you to settle in AnkiDroid. Every sync takes a backup first.
 
-- **Still in the new queue.** Nothing else to do. You have not seen the card, so
-  you will meet the whole of it, both senses, the first time you do.
-- **Already being learnt or reviewed.** You learnt it with a meaning that has
-  since grown, so the card goes back through Anki's own *Forget*: out of the
-  review schedule, back to the end of the new queue, to be learnt again as it
-  now reads. Its review history is kept.
+If your AnkiWeb account is empty, sync once from AnkiDroid or desktop Anki
+before running this. An empty account asks for a full upload, which this refuses.
 
-### Words with no definition
+## `sync` options
 
-They are not added. The run prints a prominent warning naming every skipped
-word, and the summary counts them as skipped without definition.
+| Flag | |
+| --- | --- |
+| `--deck NAME` | Deck to write to. Asked for when neither given nor remembered. |
+| `--model NAME` `--model-url URL` | See above. Remembered. |
+| `--lang CODE` | Only lookups in this language, as Kindle records it. Default `en`; `vocab.db` pools every language you've ever used. |
+| `--since YYYY-MM-DD` | Read words looked up after this date, and set the marker there. |
+| `--no-definitions` | Skip the model and add nothing. Leaves the marker alone. |
+| `--csv` `--output-dir DIR` | Write `words.csv` instead of syncing. |
+| `--test` | 10 random words. Doesn't move the marker. |
 
-### When the model cannot be reached
+The marker only advances after a successful sync, so a failed run costs nothing.
+Delete `last_access.txt` to be asked where to start again.
 
-A server that stops answering is a different case from a word the model has
-nothing useful to say about: those words are unanswered, not undefined. The run
-aborts rather than treating the entire remaining backlog as undefined.
+## Files
 
-So the first failed batch ends the run:
+In `~/.local/share/ankindle/` (or the platform equivalent):
 
-```
-  50/1920
-The model at http://localhost:8081/v1 is not answering, so every remaining word
-would come back blank. Nothing was added and the last-run marker was left alone
-- run this again once it is back.
-```
+- `collection.anki2` — this app's own collection, plus `backups/`
+- `config.json` — deck, language, model settings (0600)
+- `ankiweb_auth.json` — the session key, never the password (0600). Delete to log in again
+- `last_access.txt` — one ISO timestamp, safe to edit by hand
 
-Nothing is lost — the words stay pending for the next run.
+And `~/.cache/ankindle/frequent_words.json`, the top 1000 English words.
 
-`--no-definitions` skips the lookup without creating blank cards. It prints a
-warning and leaves the last-run marker unchanged.
-
-## First run on a new machine
-
-There is no state on a fresh machine, so the app asks where to start from before
-it reads anything:
-
-```
-No record of a previous run on this machine.
-Last dump date (YYYY-MM-DD) [blank = start fresh]: 2026-05-12
-```
-
-Leaving it blank asks for confirmation and then exports every word on the device.
-To skip the prompt (or reset the marker later), pass the date directly with
-`--since`.
-
-The marker is only advanced after a successful sync, so a failed run leaves the
-words to be picked up next time.
-
-## Safety
-
-The app keeps its own collection and syncs it like any other device. Two things
-protect the cards you already have:
-
-- **It never uploads.** A full sync in the upload direction would replace your
-  AnkiWeb collection with this one, so it is refused.
-- **First contact downloads.** AnkiWeb answers a brand-new client with
-  `FULL_SYNC` — normally a question for a human — but with nothing in the local
-  collection yet, a download cannot discard anything, so it is taken as the
-  answer. (A self-hosted sync server says `FULL_DOWNLOAD` for the same
-  situation; the app treats them the same.)
-- **Once there are notes here, a full sync aborts.** It means the two sides have
-  diverged in a way that cannot be merged, and only you can pick a direction.
-  Settle it in AnkiDroid or desktop Anki and run again. Nothing is added and the
-  last-run marker stays where it was.
-
-Every sync creates a backup first, in `backups/` next to the collection.
-
-If your AnkiWeb account is empty, sync once from AnkiDroid or desktop Anki before
-running this — an empty account asks for a full upload, which this refuses.
+Cards are `Basic` notes, word → `Front`, definition → `Back`. For a different
+note type, change `NOTETYPE`, `FRONT_FIELD` and `BACK_FIELD` at the top of
+`ankindle/anki_sync.py`. Nothing else knows the field names.
 
 ## Development
 
-### Running tests
 ```bash
-uv run pytest tests/ -v
+uv sync
+uv run pytest tests/          # seconds, no network
+uv run pytest tests/ -m live  # the ones that ask a real model
 ```
 
-The suite runs in seconds and needs no network: the Anki tests use throwaway
-collections and Anki's own sync server on localhost, including a regression test
-that bootstrapping against a populated account downloads and never uploads.
+The Anki tests run against throwaway collections and Anki's own sync server on
+localhost, including a regression test that bootstrapping against a populated
+account downloads and never uploads.
 
-Tests that call the real model are deselected by default:
+Where things live: `cli.py` parses, `commands.py` decides, `prompts.py` asks.
+`kindle/` reads the device, `anki_sync.py` writes the collection. For
+definitions, `definition_curator.py` owns the prompt and the parser and knows
+nothing about who answers it, `model.py` is the HTTP client and the settings,
+`definitions.py` the batching between them.
 
-```bash
-uv run pytest tests/ -m live
-```
+AnkiWeb rejects clients that fall too far behind, so bump the library now and
+then with `uv add anki@latest`.
 
-### Project structure
-- `ankindle/cli.py` - Argument parsing, command dispatch, and error reporting
-- `ankindle/commands.py` - What each command does, and the AnkiWeb session around it
-- `ankindle/prompts.py` - The questions asked at the terminal
-- `ankindle/kindle/detector.py` - Kindle device detection
-- `ankindle/kindle/reader.py` - Kindle database reading, language filter, word extraction
-- `ankindle/anki_sync.py` - Local Anki collection, note creation, and AnkiWeb sync
-- `ankindle/config.py` - Data-dir paths, remembered settings, AnkiWeb session key
-- `ankindle/definitions.py` - Local model client and the batching around it
-- `ankindle/definition_curator.py` - Provider-neutral LLM prompt and structured response parser
-- `ankindle/csv_exporter.py` - Writes word/definition pairs to a semicolon-CSV
-- `ankindle/frequent_words.py` - Frequent words downloading, caching, and filtering
-- `ankindle/errors.py` - Shared exception classes
-- `tests/` - Test suite
-- `PRD.md` - Product Requirements Document
+## License
 
-## Requirements
-
-- Python 3.12+
-- Linux system (for Kindle device detection)
-- Kindle device with USB connection capability
-- An AnkiWeb account
-- Internet connection
-
-## Data storage
-
-Under platform-specific user directories (via `platformdirs`), e.g.
-`~/.local/share/ankindle/` on Linux:
-
-- `collection.anki2` - the app's own Anki collection, one more device on your account
-- `backups/` - a backup taken before every sync
-- `config.json` - remembered deck and language (mode 0600)
-- `ankiweb_auth.json` - the AnkiWeb session key (mode 0600). Delete it to log in
-  again; it never contains your password
-- `last_access.txt` - a single ISO timestamp marking where the last run stopped.
-  Safe to edit by hand or delete; deleting it triggers the first-run prompt again
-
-And in the user cache dir (e.g. `~/.cache/ankindle/`):
-
-- `frequent_words.json` - the top 1000 most frequent English words
-
-`words.csv` is written to the current directory, or `--output-dir`, when `--csv`
-is used.
-
-## Note types
-
-Words are added as `Basic` notes: word to `Front`, definition to `Back`. To use a
-different note type, change `NOTETYPE`, `FRONT_FIELD` and `BACK_FIELD` at the top
-of `ankindle/anki_sync.py` — nothing else in the app knows the field names.
-
-## Keeping the anki dependency current
-
-AnkiWeb rejects clients that fall too far behind, so bump it occasionally:
-
-```bash
-uv add anki@latest
-```
+MIT, see [LICENSE](LICENSE). Links against [anki](https://github.com/ankitects/anki),
+which is AGPL-3.0; that governs the library, not this code.

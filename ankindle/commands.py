@@ -1,4 +1,5 @@
 from contextlib import contextmanager
+from dataclasses import replace
 
 from ankindle.anki_sync import AnkiCollection, auth_from_key
 from ankindle.config import AuthStore, Config
@@ -7,10 +8,12 @@ from ankindle.definitions import get_definitions
 from ankindle.errors import CSVExportError
 from ankindle.kindle.detector import KindleDetector
 from ankindle.kindle.reader import DEFAULT_LANGUAGE, KindleReader
+from ankindle.model import ChatModel, ModelSettings
 from ankindle.prompts import (
     parse_date,
     prompt_for_credentials,
     prompt_for_deck,
+    prompt_for_model,
     prompt_for_start_date,
 )
 
@@ -100,6 +103,46 @@ def choose_deck(config: Config) -> str:
     return deck
 
 
+def choose_model(config: Config, settings: ModelSettings) -> ModelSettings:
+    """Ask which model writes the definitions. Asked once, then remembered."""
+    model = prompt_for_model(ChatModel(settings).available_models())
+    config.set("model", model)
+    return replace(settings, model=model)
+
+
+def run_config() -> None:
+    """Show what a run would use, and where each setting comes from."""
+    config = Config()
+    settings = ModelSettings.load(config)
+
+    shown = [
+        ("deck", config.get("deck"), "deck"),
+        ("language", config.remember("language", None, DEFAULT_LANGUAGE), "language"),
+        ("model_url", settings.url, "model_url"),
+        ("model", settings.model, "model"),
+        ("api_key", "set" if settings.api_key else None, "api_key"),
+        ("batch_size", settings.batch_size, "batch_size"),
+        ("max_tokens", settings.max_tokens, "max_tokens"),
+        ("timeout", settings.timeout, "timeout"),
+        ("temperature", settings.temperature, "temperature"),
+        ("json_mode", settings.json_mode, "json_mode"),
+        ("disable_thinking", settings.disable_thinking, "disable_thinking"),
+    ]
+
+    print("\nWhat the next run would use:\n")
+    labels = max(len(label) for label, _, _ in shown)
+    values = max(len(str(value)) for _, value, _ in shown)
+    for label, value, key in shown:
+        if value is None:
+            print(f"  {label:<{labels}}  not set")
+        else:
+            print(f"  {label:<{labels}}  {value!s:<{values}}  ({config.source(key)})")
+
+    print(f"\nConfig file: {config.file_path}")
+    print("Set the deck and the model on the command line, the rest by editing")
+    print("that file or with ANKINDLE_<NAME> in the environment.")
+
+
 def configure_last_access(reader: KindleReader, since: str | None) -> None:
     """Make sure the reader knows where to resume from before it reads."""
     if since is None:
@@ -117,7 +160,9 @@ def configure_last_access(reader: KindleReader, since: str | None) -> None:
     print(f"Resuming from {moment.isoformat()}")
 
 
-def look_up_definitions(lookups: list, skip: bool) -> list[str | None]:
+def look_up_definitions(
+    lookups: list, settings: ModelSettings, skip: bool
+) -> list[str | None]:
     """Definitions for each word, or a deliberate skip for each."""
     if skip:
         print(
@@ -126,13 +171,11 @@ def look_up_definitions(lookups: list, skip: bool) -> list[str | None]:
         )
         return [None] * len(lookups)
 
-    print(f"\nAsking the model to define {len(lookups)} words...")
-    return get_definitions(lookups)
+    print(f"\nAsking {settings.model} to define {len(lookups)} words...")
+    return get_definitions(lookups, settings)
 
 
-def sync_words_to_anki(
-    lookups: list, deck: str, definitions: list[str | None]
-) -> None:
+def sync_words_to_anki(lookups: list, deck: str, definitions: list[str | None]) -> None:
     """Pull the collection down, add the words, push it back up."""
     words = [lookup.word for lookup in lookups]
     with anki_session() as collection:
@@ -170,6 +213,7 @@ def run_sync(args) -> None:
     config = Config()
     language = config.remember("language", args.lang, DEFAULT_LANGUAGE)
     deck = config.remember("deck", args.deck, None)
+    settings = ModelSettings.load(config, args.model_url, args.model)
 
     if args.csv and args.no_definitions:
         print("--no-definitions has nothing to write to a CSV. Drop one of them.")
@@ -177,11 +221,15 @@ def run_sync(args) -> None:
 
     if not args.csv and deck is None:
         deck = choose_deck(config)
+    if not args.no_definitions and settings.model is None:
+        settings = choose_model(config, settings)
 
-    # Both of these are remembered between runs, so say what this one settled on
+    # These are all remembered between runs, so say what this one settled on
     # before it acts on them.
     destination = "words.csv" if args.csv else f"deck '{deck}'"
     print(f"Language '{language}', into {destination}.")
+    if not args.no_definitions:
+        print(f"Definitions from {settings.model} at {settings.url}.")
 
     reader, lookups = read_kindle_words(language, args.since, args.test)
     if not lookups:
@@ -191,15 +239,15 @@ def run_sync(args) -> None:
     if args.csv:
         print("\nFetching definitions and exporting to CSV...")
         try:
-            csv_path = CSVExporter(output_dir=args.output_dir).export_words_to_csv(
-                lookups
-            )
+            csv_path = CSVExporter(
+                settings, output_dir=args.output_dir
+            ).export_words_to_csv(lookups)
         except CSVExportError as e:
             print(f"Failed to export: {e}")
             return
         print(f"Exported to: {csv_path}")
     else:
-        definitions = look_up_definitions(lookups, args.no_definitions)
+        definitions = look_up_definitions(lookups, settings, args.no_definitions)
         if args.no_definitions:
             return
         sync_words_to_anki(lookups, deck, definitions)

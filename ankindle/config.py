@@ -4,6 +4,7 @@ import os
 from platformdirs import user_data_dir
 
 DATA_DIR = user_data_dir("ankindle")
+ENV_PREFIX = "ANKINDLE_"
 DEFAULT_CONFIG_FILE = os.path.join(DATA_DIR, "config.json")
 DEFAULT_AUTH_FILE = os.path.join(DATA_DIR, "ankiweb_auth.json")
 COLLECTION_PATH = os.path.join(DATA_DIR, "collection.anki2")
@@ -41,12 +42,30 @@ class Config:
         _write_json(self.file_path, settings, mode=0o600)
 
     def remember(self, key: str, value, default):
-        """Take the given value, else what was stored, else the default."""
+        """The given value, else the environment, else what was stored, else
+        the default.
+
+        A value given on the command line is written down, so it only has to be
+        given once. A value from the environment is not: it belongs to the
+        shell that set it, and writing it down would outlive that shell.
+        """
         if value is not None:
             if value != self.get(key):
                 self.set(key, value)
             return value
+
+        from_environment = os.environ.get(ENV_PREFIX + key.upper())
+        if from_environment is not None:
+            return from_environment
         return self.get(key, default)
+
+    def source(self, key: str) -> str:
+        """Where `remember` would take this setting from, for `ankindle config`."""
+        if ENV_PREFIX + key.upper() in os.environ:
+            return "environment"
+        if key in (_read_json(self.file_path) or {}):
+            return "config file"
+        return "default"
 
 
 class AuthStore:
@@ -62,6 +81,4 @@ class AuthStore:
         return stored["hkey"], stored.get("endpoint", "")
 
     def write(self, hkey: str, endpoint: str) -> None:
-        _write_json(
-            self.file_path, {"hkey": hkey, "endpoint": endpoint}, mode=0o600
-        )
+        _write_json(self.file_path, {"hkey": hkey, "endpoint": endpoint}, mode=0o600)

@@ -1,13 +1,11 @@
 import json
 from unittest.mock import patch
 
-import pytest
-import requests
-
-from ankindle import definitions
 from ankindle.definition_curator import Lookup
-from ankindle.definitions import LocalModel, get_definitions
-from ankindle.errors import DefinitionCurationError, DefinitionsUnavailableError
+from ankindle.definitions import get_definitions
+from ankindle.model import ChatModel, ModelSettings
+
+SETTINGS = ModelSettings(model="a-model")
 
 
 def curated(words: list[str]) -> str:
@@ -16,9 +14,7 @@ def curated(words: list[str]) -> str:
             "items": [
                 {
                     "word": word,
-                    "senses": [
-                        {"part_of_speech": "n", "definition": f"a {word}"}
-                    ],
+                    "senses": [{"part_of_speech": "n", "definition": f"a {word}"}],
                 }
                 for word in words
             ]
@@ -35,64 +31,24 @@ def test_words_are_defined_in_batches_and_stay_in_order():
         asked.append(words)
         return curated(words)
 
-    with (
-        patch.object(definitions, "BATCH_SIZE", 2),
-        patch.object(LocalModel, "complete", complete),
-    ):
-        result = get_definitions(
-            [Lookup(word, f"A sentence using {word}.") for word in ("one", "two", "three")]
-        )
+    lookups = [
+        Lookup(word, f"A sentence using {word}.") for word in ("one", "two", "three")
+    ]
+    with patch.object(ChatModel, "complete", complete):
+        result = get_definitions(lookups, ModelSettings(model="a-model", batch_size=2))
 
     assert asked == [["one", "two"], ["three"]]
     assert result == ["(n) a one", "(n) a two", "(n) a three"]
 
 
 def test_blank_definitions_are_reported_as_a_warning(capsys):
-    response = json.dumps(
-        {"items": [{"word": "unknown", "senses": []}]}
-    )
+    response = json.dumps({"items": [{"word": "unknown", "senses": []}]})
 
-    with patch.object(LocalModel, "complete", return_value=response):
-        result = get_definitions([Lookup("unknown", "An unknown name.")])
+    with patch.object(ChatModel, "complete", return_value=response):
+        result = get_definitions([Lookup("unknown", "An unknown name.")], SETTINGS)
 
     assert result == [None]
     warning = capsys.readouterr().out
     assert "WARNING" in warning
     assert "unknown" in warning
     assert "will not be added" in warning
-
-
-def test_the_answer_is_taken_from_the_chat_completion():
-    reply = {
-        "choices": [
-            {"finish_reason": "stop", "message": {"content": curated(["one"])}}
-        ]
-    }
-
-    with patch.object(definitions.requests, "post") as post:
-        post.return_value.json.return_value = reply
-        answer = LocalModel().complete("a prompt")
-
-    body = post.call_args.kwargs["json"]
-    assert body["model"] == definitions.MODEL
-    assert body["messages"] == [{"role": "user", "content": "a prompt"}]
-    assert answer == curated(["one"])
-
-
-def test_an_answer_cut_off_by_the_token_limit_is_not_a_blank_card():
-    reply = {"choices": [{"finish_reason": "length", "message": {"content": None}}]}
-
-    with patch.object(definitions.requests, "post") as post:
-        post.return_value.json.return_value = reply
-        with pytest.raises(DefinitionCurationError, match="unfinished"):
-            LocalModel().complete("a prompt")
-
-
-def test_an_unreachable_model_is_explained_rather_than_raised_raw():
-    with patch.object(
-        definitions.requests,
-        "post",
-        side_effect=requests.ConnectionError("connection refused"),
-    ):
-        with pytest.raises(DefinitionsUnavailableError, match="not answering"):
-            LocalModel().complete("a prompt")

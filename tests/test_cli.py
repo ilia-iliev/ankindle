@@ -1,3 +1,4 @@
+import json
 import os
 import sqlite3
 import tempfile
@@ -45,6 +46,7 @@ def kindle(tmp_path):
 
     config = Config(os.path.join(tmp_path, "config.json"))
     config.set("deck", "Kindle Test")
+    config.set("model", "a-model")
 
     with (
         patch.object(commands, "KindleReader", return_value=reader),
@@ -58,9 +60,11 @@ def kindle(tmp_path):
         ),
         # nothing in this file may reach the real model; tests that care about
         # lookups patch it themselves
-        patch.object(commands, "get_definitions", lambda items: [None] * len(items)),
         patch.object(
-            csv_exporter, "get_definitions", lambda items: [None] * len(items)
+            commands, "get_definitions", lambda items, _: [None] * len(items)
+        ),
+        patch.object(
+            csv_exporter, "get_definitions", lambda items, _: [None] * len(items)
         ),
     ):
         yield reader
@@ -116,6 +120,7 @@ class TestDeckAndLanguage:
 
     def test_a_deck_is_asked_for_when_none_is_remembered(self, kindle, tmp_path):
         config = Config(os.path.join(tmp_path, "deckless.json"))
+        config.set("model", "a-model")
 
         with (
             patch.object(commands, "Config", return_value=config),
@@ -129,6 +134,7 @@ class TestDeckAndLanguage:
 
     def test_the_deck_is_not_asked_for_again(self, kindle, tmp_path):
         config = Config(os.path.join(tmp_path, "deckless.json"))
+        config.set("model", "a-model")
 
         with (
             patch.object(commands, "Config", return_value=config),
@@ -168,6 +174,7 @@ class TestCsvFallback:
 
     def test_csv_needs_no_deck(self, kindle, tmp_path):
         deckless = Config(os.path.join(tmp_path, "deckless.json"))
+        deckless.set("model", "a-model")
 
         with tempfile.TemporaryDirectory() as output_dir:
             with (
@@ -176,7 +183,7 @@ class TestCsvFallback:
             ):
                 run("--csv", "--output-dir", output_dir)
 
-            exporter.assert_called_once_with(output_dir=output_dir)
+            assert exporter.call_args.kwargs == {"output_dir": output_dir}
 
 
 class TestDefinitionOutage:
@@ -217,6 +224,49 @@ class TestDefinitionOutage:
 
 
 class TestDefinitionLookup:
+    def test_the_model_is_asked_for_when_none_is_remembered(self, kindle, tmp_path):
+        config = Config(os.path.join(tmp_path, "modelless.json"))
+        config.set("deck", "Kindle Test")
+
+        with (
+            patch.object(commands, "Config", return_value=config),
+            patch.object(
+                commands.ChatModel, "available_models", return_value=["a", "b"]
+            ),
+            patch("builtins.input", return_value="2"),
+            patch.object(commands, "sync_words_to_anki"),
+        ):
+            run()
+
+        assert config.get("model") == "b"
+
+    def test_the_model_is_not_asked_for_again(self, kindle):
+        with (
+            patch.object(commands, "ChatModel") as chat,
+            patch.object(commands, "sync_words_to_anki"),
+        ):
+            run()
+
+        chat.assert_not_called()
+
+    def test_the_model_from_the_command_line_is_used_and_remembered(self, kindle):
+        with (
+            patch.object(commands, "get_definitions") as lookup,
+            patch.object(commands, "sync_words_to_anki"),
+        ):
+            run("--model", "another-model")
+
+        assert lookup.call_args[0][1].model == "another-model"
+
+    def test_the_endpoint_from_the_command_line_reaches_the_lookup(self, kindle):
+        with (
+            patch.object(commands, "get_definitions") as lookup,
+            patch.object(commands, "sync_words_to_anki"),
+        ):
+            run("--model-url", "http://box:8081/v1")
+
+        assert lookup.call_args[0][1].url == "http://box:8081/v1"
+
     def test_definitions_are_fetched_and_handed_to_the_sync(self, kindle):
         with (
             patch.object(
@@ -229,6 +279,18 @@ class TestDefinitionLookup:
             run()
 
         assert sync.call_args[0][2] == ["(v) 1. To speak evasively"]
+
+    def test_no_definitions_does_not_ask_for_a_model(self, kindle, tmp_path):
+        config = Config(os.path.join(tmp_path, "modelless.json"))
+        config.set("deck", "Kindle Test")
+
+        with (
+            patch.object(commands, "Config", return_value=config),
+            patch.object(commands, "ChatModel") as chat,
+        ):
+            run("--no-definitions")
+
+        chat.assert_not_called()
 
     def test_no_definitions_skips_the_lookup_and_adds_nothing(self, kindle, capsys):
         with (
@@ -359,6 +421,60 @@ class TestLists:
 
         prompt.assert_not_called()
         collection.login.assert_not_called()
+
+
+class TestConfigCommand:
+    """'ankindle config' answers "what would a run do right now"."""
+
+    def test_shows_the_settings_and_where_they_come_from(self, tmp_path, capsys):
+        config = Config(os.path.join(tmp_path, "config.json"))
+        config.set("deck", "Kindle Words")
+        config.set("model", "a-model")
+
+        with patch.object(commands, "Config", return_value=config):
+            run_command("config")
+
+        out = capsys.readouterr().out
+        assert "Kindle Words" in out
+        assert "a-model" in out
+        assert "(config file)" in out
+        assert config.file_path in out
+
+    def test_an_unset_setting_says_so_rather_than_showing_none(
+        self, tmp_path, capsys
+    ):
+        config = Config(os.path.join(tmp_path, "empty.json"))
+
+        with patch.object(commands, "Config", return_value=config):
+            run_command("config")
+
+        out = capsys.readouterr().out
+        assert "model             not set" in out
+        assert "None" not in out
+
+    def test_the_key_is_never_printed(self, tmp_path, capsys):
+        config = Config(os.path.join(tmp_path, "config.json"))
+
+        with (
+            patch.object(commands, "Config", return_value=config),
+            patch.dict(os.environ, {"ANKINDLE_API_KEY": "sk-secret"}),
+        ):
+            run_command("config")
+
+        out = capsys.readouterr().out
+        assert "sk-secret" not in out
+        assert "api_key" in out
+        assert "environment" in out
+
+    def test_looking_does_not_change_anything(self, tmp_path):
+        config = Config(os.path.join(tmp_path, "config.json"))
+        config.set("deck", "Kindle Words")
+
+        with patch.object(commands, "Config", return_value=config):
+            run_command("config")
+
+        with open(config.file_path) as f:
+            assert list(json.load(f)) == ["deck"]
 
 
 class TestRememberedSettingsAreVisible:

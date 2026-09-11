@@ -4,31 +4,35 @@ import os
 import csv
 from unittest.mock import patch
 from ankindle import csv_exporter
-from ankindle.definition_curator import Lookup
 from ankindle.csv_exporter import CSVExporter
+from ankindle.definition_curator import Lookup
+from ankindle.errors import CSVExportError
+from ankindle.config import Config
+from ankindle.model import ModelSettings
+
+SETTINGS = ModelSettings(model="a-model")
 
 
 def lookups(words: list[str]) -> list[Lookup]:
     return [Lookup(word, f"A sentence using {word}.") for word in words]
-from ankindle.errors import CSVExportError
 
 
 class TestCSVExporter:
     def test_init_defaults_to_cwd(self):
-        exporter = CSVExporter()
+        exporter = CSVExporter(SETTINGS)
         assert exporter.output_dir == os.getcwd()
 
     def test_init_with_custom_output_dir(self):
-        exporter = CSVExporter(output_dir="/custom/path")
+        exporter = CSVExporter(SETTINGS, output_dir="/custom/path")
         assert exporter.output_dir == "/custom/path"
 
     def test_export_with_mocked_definitions(self):
         with tempfile.TemporaryDirectory() as temp_dir:
-            exporter = CSVExporter(output_dir=temp_dir)
+            exporter = CSVExporter(SETTINGS, output_dir=temp_dir)
             with patch.object(
                 csv_exporter,
                 "get_definitions",
-                side_effect=lambda items: [f"def of {i.word}" for i in items],
+                side_effect=lambda items, _: [f"def of {i.word}" for i in items],
             ):
                 csv_path = exporter.export_words_to_csv(lookups(["hello", "world"]))
                 assert os.path.exists(csv_path)
@@ -42,11 +46,11 @@ class TestCSVExporter:
 
     def test_export_filters_out_words_without_definitions(self):
         with tempfile.TemporaryDirectory() as temp_dir:
-            exporter = CSVExporter(output_dir=temp_dir)
+            exporter = CSVExporter(SETTINGS, output_dir=temp_dir)
             with patch.object(
                 csv_exporter,
                 "get_definitions",
-                side_effect=lambda items: [
+                side_effect=lambda items, _: [
                     "a def" if i.word == "hello" else None for i in items
                 ],
             ):
@@ -60,7 +64,7 @@ class TestCSVExporter:
 
     def test_export_empty_list(self):
         with tempfile.TemporaryDirectory() as temp_dir:
-            exporter = CSVExporter(output_dir=temp_dir)
+            exporter = CSVExporter(SETTINGS, output_dir=temp_dir)
             csv_path = exporter.export_words_to_csv([])
             assert os.path.exists(csv_path)
 
@@ -70,12 +74,12 @@ class TestCSVExporter:
     def test_export_creates_directory(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             nested = os.path.join(temp_dir, "sub", "dir")
-            exporter = CSVExporter(output_dir=nested)
+            exporter = CSVExporter(SETTINGS, output_dir=nested)
             csv_path = exporter.export_words_to_csv([])
             assert os.path.exists(csv_path)
 
     def test_export_permission_error(self):
-        exporter = CSVExporter()
+        exporter = CSVExporter(SETTINGS)
         with (
             patch.object(csv_exporter, "get_definitions", return_value=["a def"]),
             patch("builtins.open", side_effect=PermissionError("denied")),
@@ -84,7 +88,7 @@ class TestCSVExporter:
                 exporter.export_words_to_csv(lookups(["hello"]))
 
     def test_validates_input(self):
-        exporter = CSVExporter()
+        exporter = CSVExporter(SETTINGS)
         with pytest.raises(ValueError):
             exporter.export_words_to_csv("not a list")
         with pytest.raises(ValueError):
@@ -92,9 +96,10 @@ class TestCSVExporter:
 
     @pytest.mark.live
     def test_export_with_a_real_model(self):
-        """Asks the real model. Deselected by default; run with -m live."""
+        """Asks the model this machine is configured for. Run with -m live."""
         with tempfile.TemporaryDirectory() as temp_dir:
-            exporter = CSVExporter(output_dir=temp_dir)
+            configured = ModelSettings.load(Config())
+            exporter = CSVExporter(configured, output_dir=temp_dir)
             csv_path = exporter.export_words_to_csv(lookups(["hello"]))
             assert os.path.exists(csv_path)
 

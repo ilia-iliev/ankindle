@@ -48,6 +48,28 @@ def prompt_for_credentials() -> tuple[str, str]:
     return username, getpass.getpass("AnkiWeb password: ")
 
 
+def prompt_for_model(model_names: list[str]) -> str:
+    """Ask which model writes the definitions, listing what the server serves.
+
+    A name that is not on the list is taken as typed: some gateways answer the
+    model listing with a subset of what they will actually accept.
+    """
+    if model_names:
+        print("\nWhich model should write the definitions?")
+        for i, name in enumerate(model_names, 1):
+            print(f"  {i}. {name}")
+    else:
+        print("\nThe server lists no models. Name the one to ask for.")
+
+    while True:
+        answer = input("Model [number, or a name]: ").strip()
+        if not answer:
+            continue
+        if answer.isdigit() and 1 <= int(answer) <= len(model_names):
+            return model_names[int(answer) - 1]
+        return answer
+
+
 def prompt_for_deck(deck_names: list[str]) -> str:
     """Ask which deck the words go to. A name that is not listed is created."""
     if deck_names:
