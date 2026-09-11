@@ -5,6 +5,17 @@ from typing import Protocol
 from ankindle.errors import DefinitionCurationError
 
 MAX_SENSES = 3
+PARTS_OF_SPEECH = [
+    "n",
+    "v",
+    "adj",
+    "adv",
+    "pron",
+    "prep",
+    "conj",
+    "interj",
+    "det",
+]
 
 SYSTEM_PROMPT = """You write dictionary entries for English vocabulary flashcards.
 
@@ -20,14 +31,16 @@ Rules:
   sense the sentence puts it in.
 - Where the sentence does not settle the meaning, prefer the common,
   contemporary, general-English meaning
-- Usually return one sense. Keep another only when the sentence leaves the
-  meaning genuinely open
+- Put the sense used by the sentence first. Include up to two other common,
+  contemporary, clearly distinct senses when they would make the card more
+  useful. Polysemous words should sometimes have more than one sense.
 - Merge overlapping senses into one short, plain definition.
-- Leave out every sense the sentence does not use, obsolete, archaic, rare,
-  dialectal and highly specialized ones included. A sense the sentence does use
-  is never left out for being any of those.
-- Do not add examples, pronunciation, etymology, part of speech, usage notes,
-  numbering, or the word itself to a definition.
+- Leave out obsolete, archaic, rare, dialectal and highly specialized senses,
+  unless the sentence uses one. A sense the sentence uses is never left out.
+- Give every sense a compact part_of_speech tag: n, v, adj, adv, pron, prep,
+  conj, interj, or det.
+- Do not add examples, pronunciation, etymology, usage notes, numbering, the
+  part-of-speech tag, or the word itself to a definition.
 - If a word is one you cannot define - a proper noun, a typo, a fragment, or a
   word from another language - return an empty list
 
@@ -39,7 +52,9 @@ Return JSON only, with this shape:
   "items": [
     {
       "word": "string copied exactly from the input",
-      "senses": ["concise definition"]
+      "senses": [
+        {"part_of_speech": "v", "definition": "concise definition"}
+      ]
     }
   ]
 }
@@ -52,7 +67,7 @@ Input:
 {"words":[{"word":"cow","sentence":"Cowed by the President, beguiled by Taft, and outclassed by Root, he agreed to readmit Japanese children."},{"word":"gull","sentence":"Gulls wheeled and cried above him, a New England portrait drawn in real life."},{"word":"blather","sentence":"He blathered on about the harvest until the lamps burned low."},{"word":"qwertle","sentence":"The qwertle stood in the doorway."}]}
 
 Output:
-{"items":[{"word":"cow","senses":["To frighten someone into submission"]},{"word":"gull","senses":["A seabird with long wings and a hooked bill"]},{"word":"blather","senses":["To talk at length without making much sense"]},{"word":"qwertle","senses":[]}]}
+{"items":[{"word":"cow","senses":[{"part_of_speech":"v","definition":"To frighten someone into submission"},{"part_of_speech":"n","definition":"A large domesticated bovine animal"}]},{"word":"gull","senses":[{"part_of_speech":"n","definition":"A seabird with long wings and a hooked bill"},{"part_of_speech":"v","definition":"To trick or deceive"}]},{"word":"blather","senses":[{"part_of_speech":"v","definition":"To talk at length without making much sense"},{"part_of_speech":"n","definition":"Long, foolish or meaningless talk"}]},{"word":"qwertle","senses":[]}]}
 """
 
 
@@ -71,7 +86,18 @@ RESPONSE_SCHEMA = {
                     "senses": {
                         "type": "array",
                         "maxItems": MAX_SENSES,
-                        "items": {"type": "string"},
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "part_of_speech": {
+                                    "type": "string",
+                                    "enum": PARTS_OF_SPEECH,
+                                },
+                                "definition": {"type": "string"},
+                            },
+                            "required": ["part_of_speech", "definition"],
+                            "additionalProperties": False,
+                        },
                     },
                 },
                 "required": ["word", "senses"],
@@ -93,18 +119,26 @@ class Lookup:
 
 
 @dataclass(frozen=True)
+class CuratedSense:
+    part_of_speech: str
+    definition: str
+
+
+@dataclass(frozen=True)
 class CuratedDefinition:
     word: str
-    senses: list[str]
+    senses: list[CuratedSense]
 
     def for_anki(self) -> str | None:
-        """One sense goes on the card bare; several get numbered."""
+        """Prefix every sense with its part of speech and number multiples."""
         if not self.senses:
             return None
         if len(self.senses) == 1:
-            return self.senses[0]
+            sense = self.senses[0]
+            return f"({sense.part_of_speech}) {sense.definition}"
         return "\n".join(
-            f"{number}. {sense}" for number, sense in enumerate(self.senses, 1)
+            f"({sense.part_of_speech}) {number}. {sense.definition}"
+            for number, sense in enumerate(self.senses, 1)
         )
 
 
@@ -153,9 +187,17 @@ def _parse_item(item: object) -> CuratedDefinition:
 
     parsed_senses = []
     for sense in senses:
-        if not isinstance(sense, str) or not sense.strip():
+        if not isinstance(sense, dict):
+            raise DefinitionCurationError(f"'{word}' has an invalid sense")
+        part_of_speech = sense.get("part_of_speech")
+        definition = sense.get("definition")
+        if part_of_speech not in PARTS_OF_SPEECH:
+            raise DefinitionCurationError(
+                f"'{word}' has an invalid part of speech"
+            )
+        if not isinstance(definition, str) or not definition.strip():
             raise DefinitionCurationError(f"'{word}' has an empty definition")
-        parsed_senses.append(sense.strip())
+        parsed_senses.append(CuratedSense(part_of_speech, definition.strip()))
 
     return CuratedDefinition(word, parsed_senses)
 

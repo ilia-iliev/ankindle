@@ -4,6 +4,7 @@ import pytest
 
 from ankindle.definition_curator import (
     CuratedDefinition,
+    CuratedSense,
     DefinitionCurator,
     Lookup,
     build_prompt,
@@ -31,7 +32,10 @@ def lookups(*words: str) -> list[Lookup]:
 def answer(*words: str) -> dict:
     return {
         "items": [
-            {"word": word, "senses": [f"a {word}"]}
+            {
+                "word": word,
+                "senses": [{"part_of_speech": "n", "definition": f"a {word}"}],
+            }
             for word in words
         ]
     }
@@ -44,6 +48,9 @@ def test_prompt_carries_each_word_with_the_sentence_it_was_met_in():
     assert '"sentence": "Cowed by the President, he agreed."' in prompt
     assert "Define the sense the sentence uses" in prompt
     assert "Merge overlapping senses" in prompt
+    assert "part_of_speech" in prompt
+    assert "other common" in prompt
+    assert "clearly distinct senses" in prompt
     assert "Return JSON only" in prompt
 
 
@@ -54,8 +61,11 @@ def test_structured_response_can_be_formatted_for_anki():
                 {
                     "word": "blather",
                     "senses": [
-                        "Nonsensical talk",
-                        "To talk without making sense",
+                        {"part_of_speech": "n", "definition": "Nonsensical talk"},
+                        {
+                            "part_of_speech": "v",
+                            "definition": "To talk without making sense",
+                        },
                     ],
                 }
             ]
@@ -67,11 +77,14 @@ def test_structured_response_can_be_formatted_for_anki():
     assert result == [
         CuratedDefinition(
             "blather",
-            ["Nonsensical talk", "To talk without making sense"],
+            [
+                CuratedSense("n", "Nonsensical talk"),
+                CuratedSense("v", "To talk without making sense"),
+            ],
         )
     ]
     assert result[0].for_anki() == (
-        "1. Nonsensical talk\n2. To talk without making sense"
+        "(n) 1. Nonsensical talk\n(v) 2. To talk without making sense"
     )
 
 
@@ -87,12 +100,20 @@ def test_empty_senses_become_a_blank_anki_definition():
         ("not json", "invalid JSON"),
         ('{"wrong": []}', "items list"),
         (
-            '{"items":[{"word":"word","senses":["one","two","three","four"]}]}',
+            '{"items":[{"word":"word","senses":[{"part_of_speech":"n","definition":"one"},{"part_of_speech":"n","definition":"two"},{"part_of_speech":"n","definition":"three"},{"part_of_speech":"n","definition":"four"}]}]}',
             "between zero and 3 senses",
         ),
         (
-            '{"items":[{"word":"word","senses":[""]}]}',
+            '{"items":[{"word":"word","senses":[{"part_of_speech":"n","definition":""}]}]}',
             "empty definition",
+        ),
+        (
+            '{"items":[{"word":"word","senses":[{"definition":"A thing"}]}]}',
+            "part of speech",
+        ),
+        (
+            '{"items":[{"word":"word","senses":[{"part_of_speech":"noun","definition":"A thing"}]}]}',
+            "part of speech",
         ),
     ],
 )
@@ -107,7 +128,9 @@ def test_curator_uses_any_model_with_the_protocol():
             "items": [
                 {
                     "word": "mendacity",
-                    "senses": ["Dishonesty"],
+                    "senses": [
+                        {"part_of_speech": "n", "definition": "Dishonesty"}
+                    ],
                 }
             ]
         }
@@ -117,7 +140,7 @@ def test_curator_uses_any_model_with_the_protocol():
     result = curator.curate(lookups("mendacity"))
 
     assert model.prompts
-    assert result[0].for_anki() == "Dishonesty"
+    assert result[0].for_anki() == "(n) Dishonesty"
 
 
 def test_answers_are_matched_by_word_not_by_position():

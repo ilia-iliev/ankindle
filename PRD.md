@@ -15,7 +15,7 @@ Application that reads user highlights (tap and hold on words) on Kindle. These 
 2.2 Keep only lookups in the chosen language. `vocab.db` pools every language the user has ever looked a word up in; the rest are dropped rather than pushed through an English dictionary.
 
 ## 3. Import into existing anki list
-3.1 For each word, add a definition written by a local LLM, in the sense the sentence the word was looked up in actually used - `vocab.db` stores that sentence for every lookup, and a reader stops at a word because of its unusual sense, not its common one: the common modern sense, at most three, in a phrase or one short sentence. A word it has nothing useful to say about is still added, with a blank back, so it is never lost silently.
+3.1 For each word, add definitions written by a local LLM. Put the sense used by the lookup sentence first, followed by up to two useful, clearly distinct modern senses. Every sense has a compact part-of-speech tag. If the model has nothing useful to say, skip the word and print a warning that names it; never add a blank card.
 
 3.1.1 An unreachable model is not the same as a word without a useful definition. If the API stops answering, abandon the run rather than adding a batch of blank cards that deduplication would stop a later run from filling in. The words stay pending.
 
@@ -23,7 +23,7 @@ Application that reads user highlights (tap and hold on words) on Kindle. These 
 
 3.3 Never resolve a full sync without the user, with one exception: when the local collection is empty there is nothing a download can discard, so first contact downloads automatically. AnkiWeb reports this case as FULL_SYNC rather than FULL_DOWNLOAD. Anything that would upload over the account aborts and asks the user to settle it in AnkiDroid or desktop Anki.
 
-3.6 `--no-definitions` adds the words without defining them, for when the model is unreachable and the words are wanted anyway.
+3.6 `--no-definitions` skips model lookup and adds nothing. It warns and leaves the last-run marker unchanged.
 
 3.4 Deduplicate in three layers: within the batch, across inflections, and against notes already in the collection. Kindle's `stem` is a stemmer, not a lemmatizer, and hands back inflections such as `spars`, so it is lemmatized before anything is compared. Every form of a word has to reduce to the same string or it becomes a second card.
 

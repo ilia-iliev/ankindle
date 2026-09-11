@@ -42,7 +42,7 @@ it is already there.
 
 The user's Anki collection contains the new words as Basic notes in the target
 deck, deduplicated, covering everything looked up since the start date. Plus a
-run summary on stdout: added N, skipped M already present, K had no definition.
+run summary on stdout: added N, skipped M already present, K skipped without definition.
 
 ## Safety rules — these are the point of the exercise
 
@@ -71,15 +71,10 @@ wrong flag. Get these wrong and the user loses years of cards.
 
 ## Words with no definition
 
-`csv_exporter.py` currently drops them silently *and* the marker still advances,
-so they are lost permanently with no trace.
-
-Add them with a blank `Back` field and report the count. A card the user has to
-finish is better than a word they never hear about again. This matters more than
-it looks: `dictionaryapi.dev` is a free unofficial API with no SLA and it was
-fully unreachable during this session's test run. If it is down mid-run, *every*
-word comes back empty, and the silent-drop behaviour would quietly eat a month of
-lookups.
+Never add a card with a blank `Back` field. Skip an individually undefined word,
+print a prominent warning that names it, and include it in the run summary. A
+model outage is different: abort the run and leave the marker unchanged instead
+of treating the remaining backlog as undefined.
 
 ## The marker
 

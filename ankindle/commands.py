@@ -118,9 +118,12 @@ def configure_last_access(reader: KindleReader, since: str | None) -> None:
 
 
 def look_up_definitions(lookups: list, skip: bool) -> list[str | None]:
-    """Definitions for each word, or a blank for each when skipping."""
+    """Definitions for each word, or a deliberate skip for each."""
     if skip:
-        print(f"\nSkipping definitions - {len(lookups)} cards will need finishing.")
+        print(
+            f"\nWARNING: definitions skipped for {len(lookups)} word(s). "
+            "They will not be added."
+        )
         return [None] * len(lookups)
 
     print(f"\nAsking the model to define {len(lookups)} words...")
@@ -197,6 +200,8 @@ def run_sync(args) -> None:
         print(f"Exported to: {csv_path}")
     else:
         definitions = look_up_definitions(lookups, args.no_definitions)
+        if args.no_definitions:
+            return
         sync_words_to_anki(lookups, deck, definitions)
 
     if not args.test:

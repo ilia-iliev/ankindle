@@ -14,7 +14,12 @@ def curated(words: list[str]) -> str:
     return json.dumps(
         {
             "items": [
-                {"word": word, "senses": [f"a {word}"]}
+                {
+                    "word": word,
+                    "senses": [
+                        {"part_of_speech": "n", "definition": f"a {word}"}
+                    ],
+                }
                 for word in words
             ]
         }
@@ -39,7 +44,22 @@ def test_words_are_defined_in_batches_and_stay_in_order():
         )
 
     assert asked == [["one", "two"], ["three"]]
-    assert result == ["a one", "a two", "a three"]
+    assert result == ["(n) a one", "(n) a two", "(n) a three"]
+
+
+def test_blank_definitions_are_reported_as_a_warning(capsys):
+    response = json.dumps(
+        {"items": [{"word": "unknown", "senses": []}]}
+    )
+
+    with patch.object(LocalModel, "complete", return_value=response):
+        result = get_definitions([Lookup("unknown", "An unknown name.")])
+
+    assert result == [None]
+    warning = capsys.readouterr().out
+    assert "WARNING" in warning
+    assert "unknown" in warning
+    assert "will not be added" in warning
 
 
 def test_the_answer_is_taken_from_the_chat_completion():

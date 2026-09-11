@@ -75,4 +75,14 @@ def get_definitions(lookups: list[Lookup]) -> list[str | None]:
         print(f"\r  {len(definitions)}/{len(lookups)}", end="", flush=True)
 
     print()
+    undefined = [
+        lookup.word
+        for lookup, definition in zip(lookups, definitions)
+        if not definition
+    ]
+    if undefined:
+        print(
+            f"WARNING: no definition for {len(undefined)} word(s): "
+            f"{', '.join(undefined)}. They will not be added."
+        )
     return definitions

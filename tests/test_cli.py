@@ -230,7 +230,7 @@ class TestDefinitionLookup:
 
         assert sync.call_args[0][2] == ["(v) 1. To speak evasively"]
 
-    def test_no_definitions_skips_the_lookup_entirely(self, kindle):
+    def test_no_definitions_skips_the_lookup_and_adds_nothing(self, kindle, capsys):
         with (
             patch.object(commands, "get_definitions") as lookup,
             patch.object(commands, "sync_words_to_anki") as sync,
@@ -238,7 +238,11 @@ class TestDefinitionLookup:
             run("--no-definitions")
 
         lookup.assert_not_called()
-        assert sync.call_args[0][2] == [None]
+        sync.assert_not_called()
+        assert kindle.last_access_manager.read() == STARTED_AT
+        warning = capsys.readouterr().out
+        assert "WARNING" in warning
+        assert "will not be added" in warning
 
     def test_no_definitions_is_refused_for_csv(self, kindle):
         with patch.object(commands, "CSVExporter") as exporter:

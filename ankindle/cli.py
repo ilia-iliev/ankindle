@@ -64,9 +64,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-definitions",
         action="store_true",
         help=(
-            "Add the words without defining them. Use when the model is "
-            "unreachable and you want the words in Anki anyway; the backs stay "
-            "blank and a later run will not fill them in."
+            "Skip the model lookup and add nothing. A warning is printed and "
+            "the last-run marker is left unchanged."
         ),
     )
     sync.add_argument(

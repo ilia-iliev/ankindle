@@ -91,14 +91,22 @@ class TestAddWords:
         assert note[BACK_FIELD] == "(v) 1. To speak evasively"
         assert note.note_type()["name"] == NOTETYPE
 
-    def test_word_without_a_definition_is_added_with_a_blank_back(self, collection):
+    def test_word_without_a_definition_is_skipped(self, collection):
         summary = collection.add_words(DECK, [("quixotic", None)])
 
-        note_id = collection.collection.find_notes(f'deck:"{DECK}"')[0]
-
-        assert summary.added == 1
+        assert summary.added == 0
         assert summary.without_definition == 1
-        assert collection.collection.get_note(note_id)[BACK_FIELD] == ""
+        assert fronts_in_deck(collection, DECK) == []
+
+    def test_multiline_definitions_render_as_separate_lines(self, collection):
+        collection.add_words(
+            DECK,
+            [("brook", "(v) 1. To tolerate\n(n) 2. A small stream")],
+        )
+
+        assert back_of(collection, "brook") == (
+            "(v) 1. To tolerate<br>(n) 2. A small stream"
+        )
 
     def test_a_word_already_in_the_collection_is_never_added_twice(self, collection):
         collection.add_words(DECK, [("prevaricate", "first definition")])
@@ -125,8 +133,8 @@ class TestAddWords:
         )
 
         assert str(summary) == (
-            "added 2, 1 updated with a new sense, 1 sent back to relearn, "
-            "1 unchanged, 1 had no definition"
+            "added 1, 1 updated with a new sense, 1 sent back to relearn, "
+            "1 unchanged, 1 skipped without definition"
         )
 
     def test_missing_note_type_is_reported_not_guessed_at(self, collection):
@@ -185,7 +193,7 @@ class TestWordsAlreadyThere:
         summary = collection.add_words(DECK, [("brook", None)])
 
         assert back_of(collection, "brook") == "A small stream"
-        assert summary.unchanged == 1
+        assert summary.without_definition == 1
         assert card_of(collection, "brook").type != CARD_TYPE_NEW
 
     def test_the_word_is_recognised_whatever_its_case(self, collection):

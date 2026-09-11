@@ -102,7 +102,7 @@ Output ends with a summary:
 
 ```
 Deck 'Kindle Words': added 12, 3 updated with a new sense, 2 sent back to
-relearn, 4 unchanged, 1 had no definition
+relearn, 4 unchanged, 1 skipped without definition
 ```
 
 `auth` is optional — `lists` and `sync` ask for the login themselves when there
@@ -119,8 +119,8 @@ is no key stored. Run it directly to log in again after a password change.
    is run through a dictionary lemmatizer as well (`spars` → `spar`, `hoarier` →
    `hoary`). A language the lemmatizer has no dictionary for keeps Kindle's stem
 5. Filter out common words (like 'the', 'be', 'to', 'of', 'and', etc.)
-6. Ask the local model to define each word in the sense the sentence
-   used, a batch at a time
+6. Ask the local model for the sentence's sense first, plus up to two useful,
+   distinct modern senses, with a part-of-speech tag on each
 7. Sync down from AnkiWeb, add the new words as Basic notes (word → `Front`,
    definition → `Back`), grow the cards that are already there, sync back up
 
@@ -131,7 +131,7 @@ is no key stored. Run it directly to log in again after a password change.
 | `--deck NAME` | Deck the words are added to. Asked for when neither given nor remembered. |
 | `--lang CODE` | Only export lookups in this language, as Kindle records it (default `en`). Remembered after the first run. |
 | `--since YYYY-MM-DD` | Export words looked up after this date, and record it as the new starting point. |
-| `--no-definitions` | Add the words without defining them. Backs stay blank. |
+| `--no-definitions` | Skip model lookup and add nothing. Warns and leaves the last-run marker unchanged. |
 | `--csv` | Write `words.csv` instead of syncing. |
 | `--output-dir DIR` | Where `--csv` writes (default: current directory). |
 | `--test` | Fetch 10 random words. Does not move the last-run marker. |
@@ -139,16 +139,18 @@ is no key stored. Run it directly to log in again after a password change.
 ### Definitions
 
 There is no dictionary API in the loop. A dictionary entry is a pile of senses -
-archaic, dialectal, specialised, near-duplicate - and a flashcard wants one.
+archaic, dialectal, specialised, near-duplicate - and a flashcard wants a small,
+useful selection.
 
 Which one is not a guess, because `vocab.db` also stores the sentence each word
 was met in, and the word goes to the model with it. You do not tap a word whose
 ordinary meaning you know, so the sense you want is usually not the common one:
 "Cowed by the President" wants *to intimidate*, not the animal, and "a slough of
-despond" wants *despair*, not a swamp. Given the sentence the model returns that
-sense and nothing else; given the word alone it returns the common meaning and
-the card is useless. The sentence itself is never sent to Anki - it selects the
-sense, and the card stays word to definition.
+despond" wants *despair*, not a swamp. Given the sentence, the model puts that sense first, then may include up to two
+other common, contemporary and clearly distinct senses. Every sense carries a
+compact part-of-speech tag such as `(n)`, `(v)` or `(adj)`. The sentence itself
+is never sent to Anki - it selects the primary sense, and the card stays word to
+definition.
 
 `ankindle/definition_curator.py` holds the prompt, the response parser and the
 Anki formatter, and knows nothing about who answers it; `ankindle/definitions.py`
@@ -168,8 +170,14 @@ it ignores twice stops the run. The expected shape is:
     {
       "word": "blather",
       "senses": [
-        "Nonsensical or foolish talk",
-        "To talk at length without making much sense"
+        {
+          "part_of_speech": "v",
+          "definition": "To talk at length without making much sense"
+        },
+        {
+          "part_of_speech": "n",
+          "definition": "Long, foolish or meaningless talk"
+        }
       ]
     }
   ]
@@ -196,15 +204,14 @@ What happens next depends on whether you have met the card yet:
 
 ### Words with no definition
 
-They are added anyway, with a blank back, and counted in the summary. A card you
-have to finish beats a word you never hear about again.
+They are not added. The run prints a prominent warning naming every skipped
+word, and the summary counts them as skipped without definition.
 
 ### When the model cannot be reached
 
 A server that stops answering is a different case from a word the model has
-nothing useful to say about: those words are unanswered, not undefined, and adding them
-blank would burn them, because deduplication makes a later run skip them rather
-than fill them in.
+nothing useful to say about: those words are unanswered, not undefined. The run
+aborts rather than treating the entire remaining backlog as undefined.
 
 So the first failed batch ends the run:
 
@@ -217,10 +224,8 @@ would come back blank. Nothing was added and the last-run marker was left alone
 
 Nothing is lost — the words stay pending for the next run.
 
-If you would rather have the words in Anki now and finish the cards yourself,
-`--no-definitions` skips the lookup entirely. Be deliberate about it: those cards
-keep blank backs, because deduplication makes a later run skip them rather than
-fill them in.
+`--no-definitions` skips the lookup without creating blank cards. It prints a
+warning and leaves the last-run marker unchanged.
 
 ## First run on a new machine
 

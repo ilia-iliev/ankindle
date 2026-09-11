@@ -61,7 +61,7 @@ class AddSummary:
             f"{self.updated} updated with a new sense, "
             f"{self.relearning} sent back to relearn, "
             f"{self.unchanged} unchanged, "
-            f"{self.without_definition} had no definition"
+            f"{self.without_definition} skipped without definition"
         )
 
 
@@ -168,6 +168,10 @@ class AnkiCollection:
         known = self._notes_by_word(notetype)
         summary = AddSummary()
         for word, definition in words:
+            if not definition:
+                summary.without_definition += 1
+                continue
+            definition = definition.replace("\n", DEFINITION_SEPARATOR)
             note = known.get(word.casefold())
             if note is None:
                 known[word.casefold()] = self._add(
@@ -195,22 +199,19 @@ class AnkiCollection:
         notetype: dict,
         deck_id: int,
         word: str,
-        definition: str | None,
+        definition: str,
         summary: AddSummary,
     ) -> Note:
         note = self.collection.new_note(notetype)
         note[FRONT_FIELD] = word
-        # A card the user has to finish beats a word they never hear about again.
-        note[BACK_FIELD] = definition or ""
+        note[BACK_FIELD] = definition
         self.collection.add_note(note, deck_id)
 
         summary.added += 1
-        if not definition:
-            summary.without_definition += 1
         return note
 
     def _append(
-        self, note: Note, definition: str | None, summary: AddSummary
+        self, note: Note, definition: str, summary: AddSummary
     ) -> None:
         """Add the sense to the card, and put a learnt card back in the queue.
 
@@ -221,7 +222,7 @@ class AnkiCollection:
         the user will meet the whole of it soon enough.
         """
         back = note[BACK_FIELD]
-        if not definition or definition in back:
+        if definition in back:
             summary.unchanged += 1
             return
 
